@@ -838,8 +838,13 @@ def op_make(args):
                 ocr_hits = 0
                 ocr_hidden = 0          # 被隱藏的空字幕中間幀數 (Tim 2026-06-10 拍板: 補間無字幕 → 不輸出)
                 ocr_uncached = 0        # cache 未供給的中間幀數 (cache-only 規格: 不現跑, 誠實計數)
+                ocr_deduped = 0         # 與前一筆完全相同被摺疊的補間幀數 (Tim 2026-07-24 精確去重; 禁靜默截斷 → 計數報告)
                 last_main_seq = 0       # 上一個主 tile 序號
                 sub_counter = 0         # 同主 tile 下的中間幀計數 (.1, .2, ...)
+                # 去重狀態 (Tim 2026-07-24): prev_norm = 上一筆已輸出字幕 (strip 正規化); prev_seen_mtime = 該句最近一次出現的 mtime
+                # 物理意義: 補間幀 text 與 prev_norm 相同且距 prev_seen_mtime <= gap → 摺疊; 主 tile 不參與摺疊但會更新 prev_norm (當錨點)
+                prev_norm = None
+                prev_seen_mtime = 0.0
 
                 for (idx, path, mtime) in ocr_frames:
                     mt_key = round(mtime, 3)
@@ -872,11 +877,31 @@ def op_make(args):
                         # (語意跟「確定無字幕」區分 — 這幀沒人看過, 不是沒字幕; 編號 sub_counter 已遞增保連續)
                         ocr_uncached += 1
                     elif text:
-                        ocr_hits += 1
-                        first_line_compact = text.replace("\n", " / ")
-                        # 主 tile 用粗體, 中間幀普通字
-                        prefix = f"- **{label}**" if is_main else f"- {label}"
-                        ocr_lines_out.append(f"{prefix} f{idx:04d} {hhmmss}: {first_line_compact}")
+                        # 精確去重 (Tim 2026-07-24): 補間幀 (#N.M) 字幕與前一筆已輸出完全相同 → 摺疊不輸出。
+                        # 邊界: (1) 只作用補間幀 — 主 tile (#N) 一律全文照印, 重複也不摺疊 (Tim: 保持原樣, 避免「同上」誤判);
+                        #       (2) 只精確比對 (strip 正規化後字串相等), 不做模糊 (Tim 明示恐影響判讀);
+                        #       (3) 3s 斷鏈 (kaguya 實測) — 距同句上次出現 > gap 秒視為真重播, 不摺疊 (防吃掉原句重播如「お兄ちゃん」)。
+                        norm = text.strip()
+                        is_dup = (
+                            getattr(args, "ocr_dedupe", True)
+                            and not is_main
+                            and prev_norm is not None
+                            and norm == prev_norm
+                            and (mtime - prev_seen_mtime) <= getattr(args, "ocr_dedupe_gap", 3.0)
+                        )
+                        if is_dup:
+                            # 摺疊: 不 append, 誠實計數; 延續該句 run (更新 mtime, 讓連續持顯的字幕整段收乾淨)
+                            ocr_deduped += 1
+                            prev_seen_mtime = mtime
+                        else:
+                            ocr_hits += 1
+                            first_line_compact = text.replace("\n", " / ")
+                            # 主 tile 用粗體, 中間幀普通字
+                            prefix = f"- **{label}**" if is_main else f"- {label}"
+                            ocr_lines_out.append(f"{prefix} f{idx:04d} {hhmmss}: {first_line_compact}")
+                            # 更新去重錨點 (主 tile 與補間幀輸出後都更新 — 主 tile 當錨點, 下個相同補間幀才摺疊得掉)
+                            prev_norm = norm
+                            prev_seen_mtime = mtime
                     else:
                         # 空字幕處理 (Tim 2026-06-10 拍板): 中間幀 (#x.y) 無字幕 → 整行隱藏不輸出
                         # (sub_counter 已遞增, 編號保持連續 — e.g. #2.3~#2.9 全空時直接跳到下一個有字幕的 #2.10);
@@ -896,7 +921,7 @@ def op_make(args):
                     f"_Mode_: {mode_label}",
                     f"_Region_: y={args.ocr_y_pct} h={args.ocr_h_pct} (字幕帶比例, 0~1)",
                     f"_Min confidence_: {args.ocr_min_conf}",
-                    f"_Frames OCR'd_: {len(ocr_frames)} (hits: {ocr_hits}, 空字幕中間幀已隱藏: {ocr_hidden}, daemon cache 命中: {ocr_cache_hits}) / _Tiles_: {len(meta)}",
+                    f"_Frames OCR'd_: {len(ocr_frames)} (hits: {ocr_hits}, 空字幕中間幀已隱藏: {ocr_hidden}, 重複字幕已摺疊: {ocr_deduped}, daemon cache 命中: {ocr_cache_hits}) / _Tiles_: {len(meta)}",
                     # cache-only 誠實標註: 未供給 > 0 = 這輪中間幀字幕不完整 (daemon OCR off / cache 落後), 不是沒字幕
                     *([f"_⚠ cache 未供給_: {ocr_uncached} 個中間幀無 OCR 結果 (daemon cache 斷供/落後, cache-only 規格不現跑)"]
                       if ocr_uncached else []),
@@ -1158,6 +1183,16 @@ def main():
                     help="(--ocr 開啟時) 字幕帶高度比例 (預設 0.12)")
     pm.add_argument("--ocr-min-conf", type=float, default=0.5,
                     help="(--ocr 開啟時) OCR 信度過濾門檻 (預設 0.5)")
+    # T-Subtitle-Dedupe (Tim 2026-07-24 拍板) — 補間幀字幕跟前一筆「完全相同」→ 摺疊不重複輸出。
+    #   只做精確去重 (不做模糊, Tim 明示恐影響判讀); 只作用補間幀 (#N.M), 主 tile (#N) 一律全文照印
+    #   (Tim: 主 tile 保持原樣, 重複就重複, 不加「同上」標記 — 避免字幕真的出現「同上」時誤判)。
+    #   3s 斷鏈 (kaguya 實測建議): 跨隱藏空幀橋接時, 距上次同句 >gap 秒 → 視為真重播不摺疊。
+    pm.add_argument("--ocr-dedupe", dest="ocr_dedupe", action="store_true", default=True,
+                    help="(--ocr 開啟時, 預設 ON) 補間幀字幕與前一筆完全相同 → 摺疊不輸出 (精確去重)")
+    pm.add_argument("--no-ocr-dedupe", dest="ocr_dedupe", action="store_false",
+                    help="關閉字幕去重, 補間幀逐幀全印 (舊行為)")
+    pm.add_argument("--ocr-dedupe-gap", dest="ocr_dedupe_gap", type=float, default=3.0,
+                    help="(去重開啟時) 同句摺疊的最大時間間隔秒數 (預設 3.0); 超過視為真重播不摺疊, 防吃掉原句重播")
     # T-StreamWatch-TavernSync (Tim 2026-06-14 拍板) — 字幕 sidecar 末尾接聊天酒館未讀訊息
     pm.add_argument("--no-tavern", dest="no_tavern", action="store_true", default=False,
                     help="(--ocr 開啟時, 酒館段預設 ON) 關閉「字幕 sidecar 末尾接酒館未讀訊息」")
