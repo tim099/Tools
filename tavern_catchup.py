@@ -65,6 +65,9 @@ REPO_ROOT = find_repo_root()
 MESSAGES_DIR = os.path.join(REPO_ROOT, "AgentCommands", "ChatTavern", "rooms", "tavern", "messages")
 CURSOR_DIR = os.path.join(REPO_ROOT, "AgentCommands", "ChatTavern", "_inbox_cursor")
 SESSION_DIR = os.path.join(REPO_ROOT, "AgentCommands", "_session")
+# R2 讀取端收斂 (2026-07-24)：durable inbox 目錄 + persona pool（persona→agent 反查用）
+INBOX_DIR = os.path.join(REPO_ROOT, "AgentCommands", "ChatTavern", "rooms", "tavern", "inbox")
+PERSONAS_DIR = os.path.join(REPO_ROOT, "AgentCommands", "AwakenInit", "personas")
 # T-PATH-02: UCL_Core Tools~/AgentCommands 走 layout-agnostic resolver, 不再寫死 CardGame/...
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
@@ -200,11 +203,25 @@ def fetch_recent_messages(min_count: int, scan_days: int = 7) -> list:
 # 過濾 + 顯示
 # ===========================================================
 
-# 區塊職責：判斷一筆訊息是否屬「系統廣播」(酒保時段提醒 / 帳務結算等)
-# 物理意義：meta.tag 開頭 bartender-relay 即系統噪音；--quiet-system 時隱藏
+# 區塊職責：判斷一筆訊息是否屬「系統噪音」(酒保時段提醒 / bartender relay)
+# 物理意義：--quiet-system 要濾的是「噪音」而非「所有酒保訊息」。原本 blanket 濾 sender_id==tavern-keeper
+#          會連銀行帳務通知(打款/轉帳/開戶/發券, 也走 tavern-keeper 身分廣播)一起殺掉 —— 導致 @ 到某
+#          persona 的發券通知, 他自己 --quiet-system catchup 反而收不到 (Tim 2026-07-24 抓包)。
+#          帳務通知早已帶可區分的 tag(bank-* / voucher-*), 據此白名單放行, 其餘酒保訊息(時段提醒等)照舊濾。
+# 白名單: tavern-keeper 發的、tag 為 bank-* / voucher-* = 重要帳務事件, 非噪音, 不濾。
+_IMPORTANT_KEEPER_TAG_PREFIXES = ("bank-", "voucher-")
+
+
 def is_system_msg(msg: dict) -> bool:
     tag = (msg.get("meta") or {}).get("tag") or ""
-    return tag.startswith("bartender-relay") or msg.get("sender_id") == "tavern-keeper"
+    if tag.startswith("bartender-relay"):
+        return True
+    if msg.get("sender_id") == "tavern-keeper":
+        # 帳務通知(bank-*/voucher-*)雖由酒保身分廣播, 屬重要事件 → 放行(不當系統噪音)
+        if any(tag.startswith(p) for p in _IMPORTANT_KEEPER_TAG_PREFIXES):
+            return False
+        return True
+    return False
 
 # 區塊職責：壓縮 body 成單行 + 截斷，方便快速掃讀
 def compact_body(body: str, max_chars: int = 240) -> str:
@@ -236,6 +253,71 @@ def print_msg(msg: dict):
         head += f"  «{tag}»"
     print(head)
     print(f"   {compact_body(msg.get('body', ''))}")
+
+
+# ===========================================================
+# Inbox surface (R2 讀取端收斂, 2026-07-24) — persona-keyed durable inbox
+# ===========================================================
+# 區塊職責：把 persona 的 durable inbox（@提及 / task handoff 落檔）在叮時一併 surface，
+#          跟上方訊息掃描合成單一「我該處理什麼」視圖（解「@→inbox 寫」跟「叮→掃訊息」兩套分裂）。
+# 物理意義：R2 persona-first 後 @persona 寫 inbox/<persona>.md、@agent 寫 inbox/<agent>.md；
+#          catchup 讀「自己 persona.md ＋ 所屬 agent.md」兩層（basecamp 2026-07-24 拍磚：agent 是共用信箱層）。
+# 收斂原則（不造第三追蹤器）：inbox 已讀狀態 = 檔內有無內容（inbox_ack.py archive 後清空）；
+#          本段純唯讀 surface，不推進任何 cursor、不動 inbox — 清除仍歸 inbox_ack.py（單一 mutator）。
+def resolve_owning_agent(persona: str) -> str:
+    """讀 AwakenInit/personas/<persona>.json 的 agent 欄；缺檔/失敗回空字串。"""
+    pf = os.path.join(PERSONAS_DIR, f"{persona}.json")
+    try:
+        with open(pf, "r", encoding="utf-8") as f:
+            return (json.load(f).get("agent") or "").strip()
+    except Exception:
+        return ""
+
+
+def read_inbox_entries(inbox_id: str):
+    """回 inbox/<inbox_id>.md 內每筆條目的 title 清單；檔缺/空/讀失敗回 []。
+
+    條目分隔錨定 '## [seq=' — 跟 inbox_ack.py count_mentions 同一約定（AppendInbox 寫 '## [seq=N] <title>'）。
+    只認這個 prefix 可避開被引用訊息 body 內的 markdown '## 標題' 汙染 title 清單。
+    """
+    p = os.path.join(INBOX_DIR, f"{inbox_id}.md")
+    if not os.path.isfile(p):
+        return []
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            text = f.read()
+    except Exception:
+        return []
+    titles = []
+    for line in text.splitlines():
+        s = line.strip()
+        if s.startswith("## [seq="):
+            titles.append(s[3:].strip())
+    return titles
+
+
+def surface_inbox(persona: str):
+    """印 persona.md（persona 層）＋ owning agent.md（agent 共用層）的未讀 inbox 條目（唯讀）。"""
+    # persona 層永遠看；agent 層只在能反查到、且 ≠ persona 名時加（避免重複讀同一檔）
+    layers = [("persona", persona)]
+    agent = resolve_owning_agent(persona)
+    if agent and agent != persona:
+        layers.append(("agent", agent))
+    any_shown = False
+    for layer_name, inbox_id in layers:
+        titles = read_inbox_entries(inbox_id)
+        if not titles:
+            continue
+        any_shown = True
+        print(f"📥 inbox/{inbox_id}.md（{layer_name} 層 · {len(titles)} 筆待處理）")
+        for t in titles[:10]:
+            print(f"   • {t}")
+        if len(titles) > 10:
+            print(f"   …還有 {len(titles) - 10} 筆（打「已讀」歸檔後不再重複列）")
+        print()
+    if any_shown:
+        print("   ↳ 處理完跑 inbox_ack.py 歸檔（persona 層 --agent <persona> / agent 層 --agent <agent>），下次叮就只剩真新。")
+        print()
 
 
 # ===========================================================
@@ -319,6 +401,10 @@ def main():
         for m in unseen:
             print_msg(m)
             print()
+
+    # 區塊：surface durable inbox（R2 讀取端收斂）— 訊息掃描是「最近活動窗」(ephemeral)，
+    #        inbox 是「未 ack 前一直在」的 durable 待辦層；兩者合成單一「我該處理什麼」視圖。
+    surface_inbox(persona)
 
     # 區塊：推進 cursor（推到 window 最大 ts，無論是否實際顯示 — agent 已被告知有 window）
     new_cursor = max(m.get("ts", "") for m in window if m.get("ts"))
