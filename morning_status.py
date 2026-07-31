@@ -2,6 +2,14 @@
 """
 T59 morning_status.py — Tim 早晨 dashboard，一行看完一切
 
+⚠ 這不是 awakening ritual 工具（2026-07-31 Sirius 誤用後加註）。
+   早安 / 晚安儀式的唯一入口是：
+       python <UCL_Core>/Tools~/AgentCommands/awakening.py morning --agent <A> --persona <P>
+       python <UCL_Core>/Tools~/AgentCommands/awakening.py goodnight --persona <P>
+   本檔只是 Tim 個人看板（HP / token / 24h 活動彙整），不寫任何 persona 狀態、
+   不發 token、不做 persona lock —— 拿它當 ritual 會「跑完什麼都沒發生」而且不會報錯。
+   （source-side guard：與其要每個 skill 先做 preflight，不如讓被誤認的這支自己聲明身分。）
+
 職責：Low-effort 模式的 cognitive load reducer — 跑一次看整體狀態。
 物理意義：彙整 HP / token / 24h tavern 活動 / 今日結算 / 待辦提示，
         Tim 不必腦補多 source 資料。
@@ -164,7 +172,21 @@ def get_pending_inbox(account):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="T59 Tim morning dashboard")
+    # 區塊職責：CLI 介面 + 身分自證
+    # 物理意義：本檔曾被誤認為 awakening ritual 工具（2026-07-31 Sirius）。誤用者第一個動作
+    #          通常是 --help，所以警語要進 argparse 而不是只放 module docstring。
+    # 數值影響：純輸出文字，不改行為。
+    _EPILOG = (
+        "WARNING 早安/晚安儀式的唯一入口是 <UCL_Core>/Tools~/AgentCommands/awakening.py" + chr(10) +
+        "   morning:   python <UCL_Core>/Tools~/AgentCommands/awakening.py morning --agent <A> --persona <P>" + chr(10) +
+        "   goodnight: python <UCL_Core>/Tools~/AgentCommands/awakening.py goodnight --persona <P>" + chr(10) +
+        "本檔只是 Tim 個人看板：不寫 persona 狀態、不發 token、不做 persona lock。"
+    )
+    parser = argparse.ArgumentParser(
+        description="T59 Tim morning dashboard — 這不是 awakening ritual 工具",
+        epilog=_EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument("--verbose", action="store_true", help="印詳細 ledger entries")
     parser.add_argument("--account", default="Tim", help="預設 Tim")
     args = parser.parse_args()
