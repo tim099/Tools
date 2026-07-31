@@ -36,51 +36,8 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
         pass
 
 
-HP_STATE_PATH = "AgentCommands/Treasury/_hp_state.json"
 LEDGER_ROOT = "AgentCommands/Treasury/ledger"
 TAVERN_ROOT = "AgentCommands/ChatTavern/rooms"
-
-
-def calc_fee(hour):
-    """區塊職責：算當前時段 health_fee"""
-    if 22 <= hour < 23: return 0
-    if 23 <= hour < 24: return 1
-    if 0 <= hour < 1: return 3
-    if 1 <= hour < 2: return 5
-    if 2 <= hour < 3: return 8
-    if 3 <= hour < 6: return 10
-    return 0
-
-
-def fee_zone_label(hour, fee):
-    """區塊職責：色 zone 標籤"""
-    if fee == 0 and hour >= 6 and hour < 22:
-        return "🟢 GREEN ZONE"
-    if hour == 22:
-        return "🟡 YELLOW (22h soft warning)"
-    if hour == 23:
-        return f"🟠 ORANGE (23h fee={fee})"
-    if 0 <= hour < 6:
-        return f"🔴 RED ({hour}h fee={fee})"
-    return "?"
-
-
-def get_tim_hp():
-    """讀 _hp_state.json 取 Tim HP"""
-    if not os.path.exists(HP_STATE_PATH):
-        return 100, 100, "init"
-    with open(HP_STATE_PATH, "r", encoding="utf-8") as f:
-        s = json.load(f)
-    tim = s.get("Tim", {})
-    return tim.get("balance", 100), tim.get("max_balance", 100), tim.get("last_refill_date", "?")
-
-
-def hp_zone(hp):
-    """區塊職責：HP zone (warning_zones per rules.json)"""
-    if hp >= 51: return "🟢 normal"
-    if hp >= 21: return "🟡 yellow (建議補健康行為)"
-    if hp >= 1: return "🟠 orange (強建議休息)"
-    return "🔴 red (HP 透支，每 task 必問)"
 
 
 def calc_balance(account):
@@ -192,23 +149,11 @@ def main():
     args = parser.parse_args()
 
     now = datetime.datetime.now()
-    hour = now.hour
-    fee = calc_fee(hour)
-    zone = fee_zone_label(hour, fee)
-
     print("=" * 72)
     print(f"  🌅 Morning Status — {now.strftime('%Y-%m-%d %H:%M:%S')} (local)")
     print("=" * 72)
 
-    # ─── Section 1: 健康狀態 ───
-    hp, max_hp, last_refill = get_tim_hp()
-    print(f"\n## 🩺 Health Guardian")
-    print(f"  zone           : {zone}")
-    print(f"  health_fee     : {fee} token / task")
-    print(f"  Tim HP         : **{hp} / {max_hp}** ({hp_zone(hp)})")
-    print(f"  last refill    : {last_refill}")
-
-    # ─── Section 2: Treasury ───
+    # ─── Section 1: Treasury ───
     balance = calc_balance(args.account)
     print(f"\n## 💰 Treasury")
     print(f"  {args.account} balance: **{balance}** tavern_token")
@@ -231,7 +176,7 @@ def main():
             sign = "+" if tp == "credit" else "-"
             print(f"    {ts} {sign}{amt:>3} {kind:<28} {(e.get('source_description') or '')[:40]}")
 
-    # ─── Section 3: Tavern 活動 ───
+    # ─── Section 2: Tavern 活動 ───
     print(f"\n## 🏨 Tavern 24h 活躍房")
     rooms_out = tavern_active_rooms_24h()
     # 縮減 output 只保前 5 行
@@ -244,7 +189,7 @@ def main():
         for line in timeline_out.split("\n")[:8]:
             print(f"  {line}")
 
-    # ─── Section 4: Inbox ───
+    # ─── Section 3: Inbox ───
     pending = get_pending_inbox(args.account)
     if pending:
         print(f"\n## 📬 {args.account} Inbox")
@@ -256,23 +201,12 @@ def main():
             room = os.path.basename(os.path.dirname(inbox_dir))   # <ROOM>
             print(f"  {mtime_str}  {room:<30}  {size:>5} bytes")
 
-    # ─── Section 5: 提示 ───
+    # ─── Section 4: 提示 ───
     print(f"\n## 💡 提示")
-    if hp == max_hp:
-        print(f"  - HP 滿血 → healthy_task overflow 全 grant token (Plan C 2:1)")
-        print(f"    → 建議：早餐 +8HP→+4token / 喝水 +3HP→+1token")
-    elif hp >= 51:
-        print(f"  - HP normal 但未滿，補健康行為直接 +HP（不 overflow）")
-    else:
-        print(f"  - HP {hp_zone(hp)} — 強建議補休息再開工")
-
     if balance == 0:
-        print(f"  - tavern_token 0 餘額 — 派 task 會 hard stop fee；建議 self-grant 或先做健康行為")
+        print(f"  - tavern_token 0 餘額 — 派 task 會 hard stop fee；建議先補足餘額")
     elif balance < 5:
         print(f"  - tavern_token 偏低 ({balance})，派 task 前注意 fee")
-
-    if hour >= 22 or hour < 6:
-        print(f"  - ⚠ 進入收費時段 — fee={fee} token / task。考慮收工")
 
     print()
 

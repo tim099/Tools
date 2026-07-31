@@ -46,7 +46,6 @@ created_by: calli (claude-code), work session ws-20260516T082717Z-e8e0
 | 工具 | 一句話 | 對應 spec / skill |
 |---|---|---|
 | [agent_task.py](agent_task.py) | T60 — Reverse task system: Agent → Tim 提案, Tim Y/N 接受 | agent-task skill |
-| [healthy_task.py](healthy_task.py) | T59 — Tim 自報健康行為 +HP + overflow 轉 tavern_token | health-guardian skill |
 
 ## 🩺 QA / Balance / Debug
 
@@ -63,7 +62,7 @@ created_by: calli (claude-code), work session ws-20260516T082717Z-e8e0
 
 | 工具 | 一句話 | 對應 spec / skill |
 |---|---|---|
-| [morning_status.py](morning_status.py) | T59 — Tim 早晨 dashboard, 一行看完 token / health / quests / online personas | morning ritual |
+| [morning_status.py](morning_status.py) | T59 — Tim 早晨 dashboard，彙整 token / Tavern 活動 / inbox | dashboard |
 
 ## 🔐 Secrets
 
