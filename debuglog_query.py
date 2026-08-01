@@ -45,12 +45,21 @@ except Exception:
 HERE = Path(__file__).resolve().parent
 # 推斷 project root: tools 通常在 AgentCommands/Tools/, repo 為其 parent.parent
 REPO_ROOT = HERE.parent.parent
-# T-PATH-02: DebugLogs 布局 per-project — LY 在 repo root/DebugLogs, CardGame 在 CardGame/Assets/DebugLogs。
+# T-PATH-02: DebugLogs 布局 per-project — LY 在 repo root/DebugLogs, CardGame 在 CardGame/Assets/DebugLogs~。
 # 取第一個實際存在的候選; 都不在則退回 repo root/DebugLogs (由 caller 報清楚的路徑)。
+#
+# ⚠ 2026-08-01：CardGame 端的輸出夾改名為 `DebugLogs~`（尾綴 `~` 讓 Unity 完全不 import ——
+#   原本 876 個 log 各自生 .meta 並在每次 asset refresh 被掃描，是 Editor 卡頓來源之一）。
+#   **新名字放在舊名字前面**：兩者可能並存一段時間（舊檔沒搬走 / 別的 branch 還在寫舊路徑），
+#   而此時該讀的是新的那個 —— 讓「還有沒有舊資料夾」決定讀哪邊，就會安靜地讀到過期的 log。
+#   寫入端在 UCL_LogUtil.InitLog()，兩邊必須同時改（漏改的失效是「查不到 = 以為沒有錯誤」）。
 DEBUG_LOG_DIR = next(
     (c for c in (
+        REPO_ROOT / "DebugLogs~",
         REPO_ROOT / "DebugLogs",
+        REPO_ROOT / "CardGame" / "Assets" / "DebugLogs~",
         REPO_ROOT / "CardGame" / "Assets" / "DebugLogs",
+        REPO_ROOT / "Assets" / "DebugLogs~",
         REPO_ROOT / "Assets" / "DebugLogs",
     ) if c.is_dir()),
     REPO_ROOT / "DebugLogs",
