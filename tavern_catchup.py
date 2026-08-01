@@ -406,6 +406,30 @@ def main():
     #        inbox 是「未 ack 前一直在」的 durable 待辦層；兩者合成單一「我該處理什麼」視圖。
     surface_inbox(persona)
 
+    # 區塊：同事上下線快照 diff（Tim 2026-08-01 拍板）— 讀酒館訊息的同時更新 presence 快照。
+    # 物理意義：online 事實源 = _session lock 檔；per-viewer 快照記「我上次看到誰在線」，
+    #          變動（誰來了/誰走了）除了印出來也 append 進本 persona 的 inbox（durable，
+    #          跟 mention 通知同層 — 醒著沒跑 catchup 的期間變動不會蒸發）。
+    # 邊界：首次跑只建快照不進 inbox（避免把「全員初見」灌成假變動）；
+    #      helper 失敗不影響 catchup 主流程（fail-soft + 明講，不靜默）。
+    try:
+        from AgentCommands._lib import presence_snapshot as _ps
+        aDiff = _ps.diff_and_update(persona)
+        if aDiff["first_time"]:
+            print(f"📡 presence 快照初建：當前在線 {', '.join(aDiff['online']) or '(無)'}")
+        elif aDiff["came"] or aDiff["left"]:
+            aParts = []
+            if aDiff["came"]:
+                aParts.append("上線: " + ", ".join(aDiff["came"]))
+            if aDiff["left"]:
+                aParts.append("下線: " + ", ".join(aDiff["left"]))
+            print(f"📡 同事狀態變動：{' ／ '.join(aParts)}（自 {aDiff['since']}）")
+            aInboxPath = _ps.append_presence_inbox(persona, aDiff["came"], aDiff["left"], aDiff["since"])
+            print(f"   ↳ 已記入 inbox：{aInboxPath}")
+        # 無變動 → 安靜（快照已刷新 taken_at）
+    except Exception as e:  # noqa: BLE001
+        print(f"⚠ presence 快照更新失敗（不影響 catchup 主結果）：{e}")
+
     # 區塊：推進 cursor（推到 window 最大 ts，無論是否實際顯示 — agent 已被告知有 window）
     new_cursor = max(m.get("ts", "") for m in window if m.get("ts"))
     if new_cursor and (not last_seen or new_cursor > last_seen):
