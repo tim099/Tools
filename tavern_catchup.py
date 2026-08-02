@@ -79,6 +79,43 @@ AWAKENING_DIR = str(_tp.UCL_AGENTCMD_DIR)
 # Persona 解析 — 自動反查 session lock
 # ===========================================================
 
+# 區塊職責：目前有 live lock 的 persona 一覽（給叮 / catchup 的表頭用）。
+# 物理意義：被叮的人第一件事是「進 context」，而「現在誰在線」是 context 的一部分 ——
+#          之前要另外跑一支指令才看得到，於是實務上沒人看。整合進既有輸出＝不增加步驟。
+# 數值影響：過期判定沿用 awakening.is_lock_expired（同一套規則，不另立標準）；
+#          讀不到一律回空 list —— **空不代表沒人在線，只代表查不到**，所以顯示時要講清楚。
+def list_online_personas():
+    try:
+        if AWAKENING_DIR not in sys.path:
+            sys.path.insert(0, AWAKENING_DIR)
+        import importlib
+        awk = importlib.import_module("awakening")
+        out = []
+        for lp in glob.glob(os.path.join(SESSION_DIR, "_persona_*.json")):
+            try:
+                with open(lp, "r", encoding="utf-8") as f:
+                    lock = json.load(f)
+                if awk.is_lock_expired(lock):
+                    continue
+                name = (lock.get("persona") or "").strip()
+                if name:
+                    out.append(name)
+            except Exception:
+                continue
+        return sorted(out)
+    except Exception:
+        return []
+
+
+def format_online_line(me: str = "") -> str:
+    """一行字：🟢 在線：a, b, c（自己標星號）。查不到時明說『查不到』而不是印空。"""
+    names = list_online_personas()
+    if not names:
+        return "🟢 在線：(查不到 lock — 不代表沒人在線)"
+    shown = [f"{n}*" if n == me else n for n in names]
+    return f"🟢 在線（{len(names)}）：{', '.join(shown)}" + ("　* = 你" if me in names else "")
+
+
 # 區塊職責：自動推斷當前 caller 對應的 persona
 # 物理意義：reuse awakening.py 的 compute_claim_origin → 找 _session/_persona_*.json 中
 #          claim_origin 相符且未過期、locked_at 最新的那筆。失敗回 None 由 caller 處理。
@@ -393,6 +430,7 @@ def main():
 
     # 區塊：輸出
     print(f"📬 叮 catchup（persona={persona}, 檢視最近 {len(window)} 筆，cursor={last_seen or '(無)'}）")
+    print(format_online_line(persona))
     print()
     if not unseen:
         print(f"✓ 沒有未看過的新訊息。")
