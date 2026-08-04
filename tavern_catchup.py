@@ -116,6 +116,47 @@ def format_online_line(me: str = "") -> str:
     return f"🟢 在線（{len(names)}）：{', '.join(shown)}" + ("　* = 你" if me in names else "")
 
 
+# 區塊職責：在線明細（給 ding brief 用；比一行版多出「憑什麼說他在線」）。
+# 物理意義：一行版只給名字，無法回答「這個名字是新鮮的還是過期 lock」——
+#          而 @ 一個其實不在線的人是靜默失敗：訊息發出去、沒人回，看起來像對方不理你。
+# 數值影響：純讀 _session/_persona_*.json；過期判定沿用 awakening.is_lock_expired（不另立標準）。
+#          **列出全部 lock 檔（含過期），過期的標明** —— 只列 live 的會讓「有 lock 但過期」
+#          跟「從來沒登入過」長得一模一樣，而這兩者要採取的行動不同。
+def online_detail_rows() -> list:
+    """回 [(persona, live?, bank)]，依 persona 排序。
+
+    只給三欄 —— persona / 是否在線 / 該 persona 的 **bank 帳戶**。
+    locked_at 與 session_key 刻意不列（Tim 2026-08-04）：叮要的是「誰在、歸誰的帳」，
+    而「這筆 lock 新不新鮮」的結論已經由 🟢/⚪ 表達 —— 把證據攤出來只是讓人再判一次。
+    第三欄取 lock 的 `bank_account`（Tim 2026-08-04 拍板 A 案），理由是 registry 的
+    `agent` 欄跨 persona 裝著兩種東西 —— summit/ame 存身分名 `Zeta`、basecamp 存工具名
+    `claude-code` —— 欄名叫 agent 而內容是混的，拿它當「帳戶」顯示會印出錯類別的值。
+    `bank_account` 字面就是帳戶，跨 persona 一致。讀不到才退回 registry agent。
+    """
+    rows = []
+    try:
+        if AWAKENING_DIR not in sys.path:
+            sys.path.insert(0, AWAKENING_DIR)
+        import importlib
+        awk = importlib.import_module("awakening")
+        expired_of = awk.is_lock_expired
+    except Exception:
+        expired_of = None
+    for lp in sorted(glob.glob(os.path.join(SESSION_DIR, "_persona_*.json"))):
+        try:
+            with open(lp, "r", encoding="utf-8") as f:
+                lock = json.load(f)
+        except Exception:
+            rows.append((os.path.basename(lp), None, ""))
+            continue
+        name = (lock.get("persona") or os.path.basename(lp)).strip()
+        live = None if expired_of is None else (not expired_of(lock))
+        rows.append((name, live,
+                     lock.get("bank_account") or resolve_owning_agent(name)
+                     or lock.get("agent") or ""))
+    return rows
+
+
 # 區塊職責：自動推斷當前 caller 對應的 persona
 # 物理意義：reuse awakening.py 的 compute_claim_origin → 找 _session/_persona_*.json 中
 #          claim_origin 相符且未過期、locked_at 最新的那筆。失敗回 None 由 caller 處理。
@@ -172,6 +213,95 @@ def resolve_persona_auto(strict: bool = True):
 # 數值影響：寫入 _inbox_cursor/<persona>.json，原子取代（先寫 tmp 再 rename）
 def cursor_path(persona: str) -> str:
     return os.path.join(CURSOR_DIR, f"{persona}.json")
+
+
+# ===========================================================
+# Ding brief — 每次叮留下「這次到底讀到了什麼」的可稽核副本
+# ===========================================================
+# 區塊職責：把本次 catchup 的**實際輸出**落檔成 letters/<persona>/_ding_brief.md（每次覆蓋）。
+# 物理意義：叮的輸出原本只存在於 stdout —— 一旦 agent 沒跑工具而自己手撈訊息，
+#          外人看不出差別（Tim 2026-08-04 抓包：summit 手寫 python 讀訊息，
+#          於是完全繞過 format_online_line，@ 了一個其實不在線的 gura）。
+#          **有檔＝跑過，沒檔或 ts 是舊的＝沒跑。** 這是可驗證性，不是紀錄癖。
+# 數值影響：唯一新增寫檔；純附加產物，不影響 cursor / token / 任何既有狀態。
+#          內容是 stdout 的 tee —— **不重建、不改寫**，所以檔案跟 agent 讀到的東西
+#          不可能漂移（重建一份「應該一樣」的副本才會漂）。
+def ding_brief_path(persona: str) -> str:
+    return os.path.join(REPO_ROOT, "AgentCommands", "ChatTavern", "baton",
+                        "letters", persona, "_ding_brief.md")
+
+
+class _Tee:
+    """同時寫真 stdout 與 buffer；不吞例外、不改內容。"""
+
+    def __init__(self, real):
+        self._real = real
+        self.buf = []
+
+    def write(self, s):
+        self.buf.append(s)
+        return self._real.write(s)
+
+    def flush(self):
+        self._real.flush()
+
+    def __getattr__(self, name):          # encoding / isatty 等一律轉給真 stdout
+        return getattr(self._real, name)
+
+
+def write_ding_brief(persona: str, captured: str, argv_note: str) -> str:
+    """落檔並回路徑；寫不了就回 ''（叮本身不該因為留存失敗而失敗）。"""
+    p = ding_brief_path(persona)
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    rows = online_detail_rows()
+    L = [
+        "---",
+        "type: ding_brief",
+        f"persona: {persona}",
+        f"generated_at: {now}",
+        "generated: mechanical   # 每次叮覆蓋 —— 手改無效，內容是 catchup stdout 的 tee",
+        f"invocation: {argv_note}",
+        "---",
+        "",
+        f"# 📬 Ding Brief — {persona}",
+        "",
+        "> 本檔＝**這次叮實際讀到的東西**（stdout 逐字 tee，非事後重建）。",
+        "> `generated_at` 不是剛剛 → 這次叮沒跑工具，下面的內容是上一次的。",
+        "",
+        "## 🟢 在線明細（憑 `_session/_persona_*.json` 的 lock）",
+        "",
+        "| persona | 狀態 | Bank（帳戶） |",
+        "|---|---|---|",
+    ]
+    if not rows:
+        L.append("| (無 lock 檔) | — | — |")
+    else:
+        for name, live, agent in rows:
+            mark = "🟢 在線" if live else ("⚪ lock 已過期" if live is False else "❔ 判不出")
+            me = "　**← 你**" if name == persona else ""
+            L.append(f"| `{name}`{me} | {mark} | {agent} |")
+    L += [
+        "",
+        "> ⚠ **空或查不到 ≠ 沒人在線**，只代表查不到 lock。",
+        "> 反過來也要小心：**沒列在這張表上的人，不要當成在線來 @** ——",
+        "> @ 一個不在線的人是靜默失敗（訊息發出去、沒人回，看起來像對方不理你）。",
+        "",
+        "## 📄 本次 catchup 輸出（逐字）",
+        "",
+        "```text",
+        captured.rstrip("\n") or "(無輸出)",
+        "```",
+    ]
+    try:
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        tmp = p + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write("\n".join(L) + "\n")
+        os.replace(tmp, p)
+        return p
+    except Exception as e:
+        print(f"⚠ ding brief 落檔失敗（叮本身不受影響）：{e}", file=sys.stderr)
+        return ""
 
 def load_cursor(persona: str) -> str:
     """回傳 last_seen_ts 字串；無 cursor 回 None。"""
@@ -311,8 +441,55 @@ def resolve_owning_agent(persona: str) -> str:
         return ""
 
 
+INBOX_SNIPPET_CHARS = 110      # 摘要上限；夠判斷「這筆值不值得點進去」就好
+
+# 區塊職責：筆數參數改吃 ChatTavern/render_settings.json（UCL_ChatTavernAdminPage 可調）。
+# 物理意義：這些數字原本硬編在本檔，而 ucl-ding 的規則正文也各寫一份（「最近 5 條 / 近 20 條」）
+#          —— 同一個數字兩處各存一份，天生會漂（而漂了不會有人喊）。
+#          C# 端寫、Python 端讀，**單一事實源**；缺檔／缺欄一律落回這裡的預設。
+# 數值影響：純讀；CLI 顯式帶值仍優先（設定只提供「預設」，不奪走現場覆蓋能力）。
+SETTINGS_PATH = os.path.join(REPO_ROOT, "AgentCommands", "ChatTavern", "render_settings.json")
+_DEFAULTS = {"ding_window_count": 10, "ding_context_count": 5, "ding_inbox_show_count": 10}
+
+
+def setting(key: str) -> int:
+    try:
+        with open(SETTINGS_PATH, "r", encoding="utf-8") as f:
+            v = (json.load(f) or {}).get(key)
+        if isinstance(v, int) and 1 <= v <= 500:
+            return v
+    except Exception:
+        pass
+    return _DEFAULTS[key]
+
+
+# 區塊職責：從一筆 inbox 條目的行群裡撈出「第一句內文」。
+# 物理意義：條目本體長這樣 —— 標題行 / `_at …_` / 「在房間 X，Y 提到了你：」/ `> <內文第一行>` / 內文續行。
+#          原本只取標題（「💬 被 X 提及 (seq=N)」），那句話**不含任何內容**，
+#          於是 47 筆待辦長得一模一樣、無法排序、實務上整批被跳過。
+# 數值影響：純讀，不改檔。內文已經在 inbox 檔裡（引言區）—— 這是**讀取端把它丟掉**，
+#          所以修讀取端就好，不必動寫入端、也不必為既有 47 筆做任何遷移。
+def _entry_snippet(lines: list) -> str:
+    picked = []
+    for ln in lines:
+        s = ln.strip()
+        if not s or s.startswith("_at ") or s.startswith("在房間 ") or s.startswith("建議動作"):
+            continue
+        if s.startswith(">"):
+            s = s.lstrip("> ").strip()
+        if not s:
+            continue
+        picked.append(s)
+        if sum(len(x) for x in picked) >= 20:     # 太短的第一行（純標題句）再補一行才有判斷價值
+            break
+    if not picked:
+        return ""
+    text = " ".join(picked).replace("**", "")
+    return text[:INBOX_SNIPPET_CHARS] + ("…" if len(text) > INBOX_SNIPPET_CHARS else "")
+
+
 def read_inbox_entries(inbox_id: str):
-    """回 inbox/<inbox_id>.md 內每筆條目的 title 清單；檔缺/空/讀失敗回 []。
+    """回 inbox/<inbox_id>.md 內每筆條目的 (title, snippet)；檔缺/空/讀失敗回 []。
 
     條目分隔錨定 '## [seq=' — 跟 inbox_ack.py count_mentions 同一約定（AppendInbox 寫 '## [seq=N] <title>'）。
     只認這個 prefix 可避開被引用訊息 body 內的 markdown '## 標題' 汙染 title 清單。
@@ -325,32 +502,49 @@ def read_inbox_entries(inbox_id: str):
             text = f.read()
     except Exception:
         return []
-    titles = []
+    entries, cur_title, cur_lines = [], None, []
     for line in text.splitlines():
         s = line.strip()
         if s.startswith("## [seq="):
-            titles.append(s[3:].strip())
-    return titles
+            if cur_title is not None:
+                entries.append((cur_title, _entry_snippet(cur_lines)))
+            cur_title, cur_lines = s[3:].strip(), []
+        elif cur_title is not None:
+            cur_lines.append(line)
+    if cur_title is not None:
+        entries.append((cur_title, _entry_snippet(cur_lines)))
+    return entries
 
 
-def surface_inbox(persona: str):
+def surface_inbox(persona: str, inbox_show: int = None):
     """印 persona.md（persona 層）＋ owning agent.md（agent 共用層）的未讀 inbox 條目（唯讀）。"""
-    # persona 層永遠看；agent 層只在能反查到、且 ≠ persona 名時加（避免重複讀同一檔）
+    if inbox_show is None:
+        inbox_show = setting("ding_inbox_show_count")
+    # **只看 persona 層。** agent 層 inbox 已退場（Tim 2026-08-04：agent 現在代表的是銀行帳戶，
+    # 不是身分層）—— 一個帳戶名下所有 persona 共用一份待辦，等於誰都不負責，
+    # 而它的 backlog（Zeta 層 48 筆）也從來沒有人清。@ 要送到人，不是送到戶頭。
     layers = [("persona", persona)]
-    agent = resolve_owning_agent(persona)
-    if agent and agent != persona:
-        layers.append(("agent", agent))
     any_shown = False
     for layer_name, inbox_id in layers:
-        titles = read_inbox_entries(inbox_id)
-        if not titles:
+        entries = read_inbox_entries(inbox_id)
+        if not entries:
             continue
         any_shown = True
-        print(f"📥 inbox/{inbox_id}.md（{layer_name} 層 · {len(titles)} 筆待處理）")
-        for t in titles[:10]:
+        # **取最新 N 筆，不是最舊 N 筆。** 血證 2026-08-04：積了 47 筆待辦時，舊版印最舊 10 筆
+        # （7/24 的），而當天 8 筆真正該回的 @ 全被折進「還有 37 筆」——
+        # 叮問的是「剛剛發生什麼」，舊版答的是「最久以前欠什麼」，兩者在有 backlog 時完全不重疊。
+        # 較舊的仍以筆數明示（禁靜默截斷），要逐筆看就直接讀 inbox 檔。
+        recent = entries[-inbox_show:] if inbox_show > 0 else entries
+        older = len(entries) - len(recent)
+        head = f"📥 inbox/{inbox_id}.md（{layer_name} 層 · {len(entries)} 筆待處理"
+        head += f"，以下為**最新 {len(recent)} 筆**）" if older else "）"
+        print(head)
+        for t, snip in recent:
             print(f"   • {t}")
-        if len(titles) > 10:
-            print(f"   …還有 {len(titles) - 10} 筆（打「已讀」歸檔後不再重複列）")
+            if snip:
+                print(f"     ↳ {snip}")
+        if older:
+            print(f"   …另有 {older} 筆較舊（最舊的在 inbox 檔頂端；打「已讀」歸檔後不再重複列）")
         print()
     if any_shown:
         print("   ↳ 處理完跑 inbox_ack.py 歸檔（persona 層 --agent <persona> / agent 層 --agent <agent>），下次叮就只剩真新。")
@@ -367,15 +561,25 @@ def main():
     )
     ap.add_argument("--persona", default=None,
                     help="目標 persona（缺則自動反查 session lock）。")
-    ap.add_argument("--min", type=int, default=10, dest="min_count",
-                    help="檢視 window 大小（最近 N 筆）；預設 10。")
+    ap.add_argument("--min", type=int, default=None, dest="min_count",
+                    help="檢視 window 大小（最近 N 筆）；預設讀 render_settings.json "
+                         "的 ding_window_count（管理頁可調，內建 10）。")
     ap.add_argument("--include-self", action="store_true",
                     help="預設過濾自己發的訊息；加此 flag 顯示。")
     ap.add_argument("--quiet-system", action="store_true",
-                    help="隱藏酒保系統廣播（時段提醒、結算等）。")
+                    help="隱藏酒保系統廣播。**叮不建議用**（Tim 2026-08-04：酒保訊息現在多半是"
+                         "打款／獎金這類重要事件，不是噪音）。用了會印出被藏幾筆。")
+    ap.add_argument("--context", type=int, default=None,
+                    help="未看訊息少於 N 筆時，補印已看過的最近訊息湊到 N 筆掌握近況"
+                         "（預設讀 ding_context_count，內建 5 = ucl-ding 的「至少讀最近 5 條」；0 = 不補）。")
     ap.add_argument("--reset", action="store_true",
                     help="重置 cursor（刪除 cursor 檔，下次叮會看到全部 window）。")
     args = ap.parse_args()
+    # None = 未顯式指定 → 落回管理頁設定（單一事實源）；顯式帶值一律優先
+    if args.min_count is None:
+        args.min_count = setting("ding_window_count")
+    if args.context is None:
+        args.context = setting("ding_context_count")
 
     # 區塊：persona 解析 (T33.2 — multi-lock 同 origin 警告)
     # 物理意義：caller 帶 --persona 直接吃；否則 auto-resolve, 但多 live lock 時拒猜
@@ -399,6 +603,26 @@ def main():
         print("❌ 無法解析 persona（自動反查失敗且未顯式 --persona）", file=sys.stderr)
         return 2
 
+    # 區塊：ding brief tee（persona 已定案之後才裝 —— 之前的錯誤沒有歸屬對象可落檔）
+    # 物理意義：把 _run 的 stdout 逐字複製一份到 letters/<persona>/_ding_brief.md。
+    #          裝在這裡而不是每個 print 各自寫，是因為 print 散在 print_msg / surface_inbox 裡，
+    #          逐點改一定漏（而漏掉的那幾行沒有任何檢查會發現）。
+    real = sys.stdout
+    tee = _Tee(real)
+    sys.stdout = tee
+    try:
+        code = _run(args, persona)
+    finally:
+        sys.stdout = real
+        bp = write_ding_brief(persona, "".join(tee.buf),
+                              " ".join(sys.argv[1:]) or "(無參數)")
+        if bp:
+            print(f"📄 ding brief：{os.path.relpath(bp, REPO_ROOT)}（每次叮覆蓋）")
+    return code
+
+
+def _run(args, persona: str) -> int:
+    """叮 catchup 本體。輸出全程被 main() 的 tee 複製進 ding brief。"""
     # 區塊：--reset 處理
     if args.reset:
         p = cursor_path(persona)
@@ -416,8 +640,11 @@ def main():
         return 0
 
     # 區塊：載 cursor + 過濾
+    # `--quiet-system` 是 **opt-in，且不再是叮的建議用法**（Tim 2026-08-04）：
+    #   酒保訊息現在多半是打款／獎金這類重要事件，不是噪音 —— 預設靜音等於預設藏錢。
+    #   真的要靜音時，下面會**印出被藏了幾筆**（禁靜默截斷：藏 N 筆就要說 N）。
     last_seen = load_cursor(persona)
-    unseen = []
+    unseen, hidden_system = [], 0
     for m in window:
         ts = m.get("ts", "")
         if last_seen and ts <= last_seen:
@@ -425,13 +652,25 @@ def main():
         if not args.include_self and m.get("sender_persona") == persona:
             continue  # 自己的 post 不重複給自己看
         if args.quiet_system and is_system_msg(m):
+            hidden_system += 1
             continue
         unseen.append(m)
 
     # 區塊：輸出
     print(f"📬 叮 catchup（persona={persona}, 檢視最近 {len(window)} 筆，cursor={last_seen or '(無)'}）")
     print(format_online_line(persona))
+    # 在線明細也印進 stdout（不只落 brief）—— 一行版只給名字，答不了「這名字新鮮嗎」，
+    # 而 @ 一個不在線的人是靜默失敗。印在這裡＝agent 不必多跑一步就看得到。
+    for name, live, agent in online_detail_rows():
+        mark = "🟢" if live else ("⚪ lock 過期" if live is False else "❔")
+        me = " ← 你" if name == persona else ""
+        print(f"   {mark} {name}{me}" + (f"　（{agent}）" if agent else ""))
+    print("   ⚠ 沒列在上面的人不要當成在線來 @（空 ≠ 沒人，只是查不到 lock）")
     print()
+    if hidden_system:
+        print(f"🔇 已隱藏 {hidden_system} 筆酒保系統廣播（--quiet-system）——"
+              f" 打款／獎金也可能在裡面，拿掉旗標就看得到。")
+        print()
     if not unseen:
         print(f"✓ 沒有未看過的新訊息。")
     else:
@@ -439,6 +678,23 @@ def main():
         for m in unseen:
             print_msg(m)
             print()
+
+    # 區塊：補 context（把 ucl-ding 的「至少讀最近 N 條掌握 context」收進工具）
+    # 物理意義：cursor 只給「沒看過的」，安靜的一天可能是 0 筆 —— 而叮的目的是「進 context」，
+    #          不是「確認沒有新訊息」。原本 skill 要 agent 自己補跑 op=read limit=5，
+    #          而「要人記得補跑」的步驟實務上就是不會跑（今天我就沒跑）。
+    # 數值影響：純讀同一個 window，不動 cursor；已在上面印過的不重印。
+    if args.context > 0 and len(unseen) < args.context:
+        shown_ts = {m.get("ts") for m in unseen}
+        pool = [m for m in window
+                if m.get("ts") not in shown_ts
+                and (args.include_self or m.get("sender_persona") != persona)]
+        extra = pool[-(args.context - len(unseen)):] if pool else []
+        if extra:
+            print(f"== 補 context：另外 {len(extra)} 筆（已看過，僅供掌握近況）==")
+            for m in extra:
+                print_msg(m)
+                print()
 
     # 區塊：surface durable inbox（R2 讀取端收斂）— 訊息掃描是「最近活動窗」(ephemeral)，
     #        inbox 是「未 ack 前一直在」的 durable 待辦層；兩者合成單一「我該處理什麼」視圖。
