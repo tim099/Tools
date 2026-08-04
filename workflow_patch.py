@@ -9,7 +9,7 @@ workflow_patch.py — Workflow 補丁機制 CLI (Proposal #31)
 
 子命令:
   register --workflow <slug> --root-cause "..." --patch-summary "..."
-           --applied-by <agent_id> [--qa-bug-ref <X>] [--ucl-core]
+           --applied-by <agent_id> [--ucl-core]
                                           register 新 patch (auto-increment id)
   list --workflow <slug>                   列該 workflow 所有 patches
   status --workflow <slug>                 印當前 counter + 是否需 refactor
@@ -24,8 +24,7 @@ workflow_patch.py — Workflow 補丁機制 CLI (Proposal #31)
     --workflow commit-workflow \\
     --root-cause "三層 bump 中 UCL submodule 未切 Dev 分支 → detached HEAD" \\
     --patch-summary "commit 前必先 git -C UCL checkout Dev" \\
-    --applied-by claude-da-xiaojie \\
-    --qa-bug-ref CommitDetachedHEAD
+    --applied-by claude-da-xiaojie \
 
   # 看狀態
   python workflow_patch.py status --workflow commit-workflow
@@ -40,7 +39,6 @@ workflow_patch.py — Workflow 補丁機制 CLI (Proposal #31)
   - 補丁 ≥ 3 → register 第 4 個 reject (強制 refactor)
   - refactor 後 archive 舊 patches 到 refactor_history.md, patch counter reset 為 0
   - storage: docs/Workflows/_patches/<workflow-slug>/
-  - cross-link qa-bug-reward: qa-bug-ref 欄位連到 qa_bug_confirmed ledger entry
 """
 
 import argparse
@@ -142,13 +140,11 @@ def cmd_register(args):
         f"workflow_slug: {slug}\n"
         f"applied_at: {ts}\n"
         f"applied_by: {args.applied_by}\n"
-        f"qa_bug_ref: {args.qa_bug_ref or '(none)'}\n"
         f"patch_summary: {json.dumps(args.patch_summary, ensure_ascii=False)}\n"
         f"---\n\n"
         f"# Patch {patch_id:03d}: {args.patch_summary}\n\n"
         f"## 起因 (Root Cause)\n\n{args.root_cause}\n\n"
         f"## 修法 (Patch)\n\n_(請寫入詳細修法 — 加什麼 if-then-else / 在 SKILL/Workflow doc 哪段)_\n\n"
-        f"## QA Bug ref\n\n{args.qa_bug_ref or '_(無對應 qa_bug_reward ledger entry)_'}\n\n"
         f"## 適用範圍 / 邊界\n\n_(列出邊界 case + anti-pattern)_\n"
     )
     with open(patch_path, "w", encoding="utf-8") as f:
@@ -160,7 +156,6 @@ def cmd_register(args):
         "filename": filename,
         "applied_at": ts,
         "applied_by": args.applied_by,
-        "qa_bug_ref": args.qa_bug_ref,
         "summary": args.patch_summary,
     })
     _save_index(slug, idx)
@@ -168,8 +163,6 @@ def cmd_register(args):
     print(f"[ok] patch {patch_id:03d} registered for workflow `{slug}`")
     print(f"     path: docs/Workflows/_patches/{slug}/{filename}")
     print(f"     applied_by: {args.applied_by}")
-    if args.qa_bug_ref:
-        print(f"     qa_bug_ref: {args.qa_bug_ref}")
     remaining = PATCH_LIMIT - idx["patch_count"]
     if remaining == 0:
         print(f"⚠ patch count = {PATCH_LIMIT} (上限). 下次 register 會 reject — 該 refactor 了。")
@@ -190,10 +183,10 @@ def cmd_list(args):
     if not idx["patches"]:
         print("_(no patches)_")
         return 0
-    print("| ID | Applied By | At | QA Ref | Summary |")
-    print("|---|---|---|---|---|")
+    print("| ID | Applied By | At | Summary |")
+    print("|---|---|---|---|")
     for p in idx["patches"]:
-        print(f"| {p['id']:03d} | {p['applied_by']} | {p['applied_at']} | {p.get('qa_bug_ref') or '—'} | {p['summary']} |")
+        print(f"| {p['id']:03d} | {p['applied_by']} | {p['applied_at']} | {p['summary']} |")
     return 0
 
 
@@ -303,7 +296,6 @@ def main():
     p_reg.add_argument("--root-cause", required=True, help="bug root cause")
     p_reg.add_argument("--patch-summary", required=True, help="一句修法 (filename 用)")
     p_reg.add_argument("--applied-by", required=True)
-    p_reg.add_argument("--qa-bug-ref", default=None, help="對應 qa_bug_reward ledger entry ref")
     p_reg.set_defaults(func=cmd_register)
 
     p_list = sub.add_parser("list", help="列 workflow 所有 patches")
