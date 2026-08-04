@@ -18,11 +18,21 @@ created_by: calli (claude-code), work session ws-20260516T082717Z-e8e0
 
 ## 💰 Treasury / Economy
 
+
+> [!IMPORTANT]
+> **財務相關操作一律走 Cmd（C# server 端），python 不直寫**（Tim 2026-08-04 定調）。
+> 已於 2026-08-04 移除三支直寫 ledger 的工具：
+> `gold_convert.py`（EoV 專案的，不屬本 repo）、
+> `qa_bug_reward.py`（對應 skill 已移除）、
+> `treasury_revert.py`（revert 屬 Bank 後台操作且應走請款單，不該是 python 工具）。
+>
+> 動錢請走 `Cmd_Treasury`（`op=credit` / `debit` / `transfer_request` / `request`）
+> 或 `UCL_BankAdminPage`。理由：直寫會繞過冪等判重、`sig_*` 簽章、
+> 以及**餘額快取的增量維護** —— 後者會讓 Editor 看到的餘額與磁碟不一致且無錯誤訊息。
+
 | 工具 | 一句話 | 對應 spec / skill |
 |---|---|---|
 | [balance_query.py](balance_query.py) | 查任一 actor / agent / persona Treasury 餘額 (ledger source-of-truth) | T41 ledger spec |
-| [treasury_revert.py](treasury_revert.py) | T61 — Ad-hoc 交易 revert (誤付 / 撤銷 / 補正) | T61 spec |
-| [gold_convert.py](gold_convert.py) | T57 — SafeHouse Token ↔ Gold 兌換 MVP | Plan_SafeHouse_Gold_Anchor |
 | [migrate_voucher_v1_to_v2.py](migrate_voucher_v1_to_v2.py) | 酒館券資料格式 v1 → v2 遷移 | one-shot migration |
 
 ## 🎭 Persona / Affinity / Identity
@@ -51,7 +61,6 @@ created_by: calli (claude-code), work session ws-20260516T082717Z-e8e0
 
 | 工具 | 一句話 | 對應 spec / skill |
 |---|---|---|
-| [qa_bug_reward.py](qa_bug_reward.py) | T68 — Tim QA confirm bug agent 拍板 grant reward token | qa-bug-reward skill |
 | [qa_balance_report.py](qa_balance_report.py) | T07 — QA Battle Balance Report Aggregator | Plan_QA_Battle_Balance_Workflow |
 | [qa_record_battle.py](qa_record_battle.py) | T03 — Battle Result Recorder | Plan_QA_Battle_Balance_Workflow |
 | [qa_score_card.py](qa_score_card.py) | T04 — Card Power Scorer | Plan_QA_Battle_Balance_Workflow |
