@@ -547,7 +547,14 @@ def surface_inbox(persona: str, inbox_show: int = None):
             print(f"   …另有 {older} 筆較舊（最舊的在 inbox 檔頂端；打「已讀」歸檔後不再重複列）")
         print()
     if any_shown:
-        print("   ↳ 處理完跑 inbox_ack.py 歸檔（persona 層 --agent <persona> / agent 層 --agent <agent>），下次叮就只剩真新。")
+        # inbox_ack.py 住在 UCL_Core 的 CommandResolver/，跟本檔不同層 —— 提示不印完整路徑
+        # 的話 agent 會憑直覺猜 AgentCommands/Tools/（wake#48 實踩），所以這裡印解析後的實路徑。
+        ack_path = os.path.join(AWAKENING_DIR, "CommandResolver", "inbox_ack.py")
+        try:
+            ack_disp = os.path.relpath(ack_path, REPO_ROOT).replace("\\", "/")
+        except ValueError:
+            ack_disp = ack_path.replace("\\", "/")
+        print(f"   ↳ 處理完跑 python {ack_disp} 歸檔（persona 層 --agent <persona> / agent 層 --agent <agent>），下次叮就只剩真新。")
         print()
 
 
