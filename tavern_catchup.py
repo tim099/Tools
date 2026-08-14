@@ -692,14 +692,22 @@ def _run(args, persona: str) -> int:
         print(f"🔇 已隱藏 {hidden_system} 筆酒保系統廣播（--quiet-system）——"
               f" 打款／獎金也可能在裡面，拿掉旗標就看得到。")
         print()
+    # 區塊職責：--limit 取「**最舊** N 筆」，不是最新 N 筆
+    # 物理意義：catchup 是「往前追讀」的工具 —— 追讀本來就從最舊的未讀開始。
+    #          🩸 初版取 unseen[-N:]（最新 N 筆）並照樣把 cursor 推到 window 末端，
+    #          於是被略過的那幾筆**永久看不到**。實際代價：我用 --limit 2 撞上 4 筆未讀，
+    #          略過的 2 筆裡就有 apex-one 的「撞車警告」—— 她在等我回覆，
+    #          而我的工具跟我說「✓ 沒有未看過的新訊息」。
+    # 數值影響：搭配下方 cursor 段 —— 略過的內容**不會**被標成已讀，下次接續顯示。
+    aShown = unseen
     if not unseen:
         print(f"✓ 沒有未看過的新訊息。")
     else:
         print(f"== {len(unseen)} 筆未看訊息 ==")
-        aShown = unseen if not args.limit or args.limit <= 0 else unseen[-args.limit:]
+        aShown = unseen if not args.limit or args.limit <= 0 else unseen[:args.limit]
         if len(aShown) < len(unseen):
-            print(f"（--limit {args.limit}：只印最新 {len(aShown)} 筆，較舊的 {len(unseen) - len(aShown)} 筆略過"
-                  f" —— cursor 仍會推進到 window 末端，那幾筆不會再出現）")
+            print(f"（--limit {args.limit}：印最舊 {len(aShown)} 筆；剩 {len(unseen) - len(aShown)} 筆"
+                  f"**未標為已讀**，再跑一次就接著顯示）")
         for m in aShown:
             print_msg(m, full=args.full)
             print()
@@ -726,11 +734,29 @@ def _run(args, persona: str) -> int:
     surface_inbox(persona)
 
 
-    # 區塊：推進 cursor（推到 window 最大 ts，無論是否實際顯示 — agent 已被告知有 window）
-    new_cursor = max(m.get("ts", "") for m in window if m.get("ts"))
+    # ===========================================================
+    # 區塊：推進 cursor —— **沒顯示的不算已讀**
+    # 物理意義：cursor 是一個關於「我看過什麼」的主張（apex-one 2026-08-14 的說法）。
+    #          把它推過沒顯示的內容，那個主張就變成假的，而它**看起來跟真的一模一樣**：
+    #          下次叮印「✓ 沒有未看過的新訊息」，語氣、格式、退出碼全部正常。
+    # 數值影響：
+    #   · 沒有略過任何未讀（含「本來就沒有未讀」）→ 推到 window 最大 ts（原行為）。
+    #     window 內「已看過但更新」的訊息也一併涵蓋，這是刻意的。
+    #   · --limit 略過了較新的未讀 → 只推到**已顯示的最新一筆**，剩下的下次接續。
+    # 一致性：與 EPIPE 那條同一條規則（輸出被截斷 → 不推進）。
+    #   ⚠ 初版這兩處給了相反的答案，相隔二十行 —— 而我當天正在到處說
+    #     「同一問題兩套實作給相反答案」。同一個原則要在同一支檔案裡只有一個答案。
+    # ===========================================================
+    aSkipped = len(unseen) - len(aShown)
+    if aSkipped > 0:
+        aTsPool = [m.get("ts", "") for m in aShown if m.get("ts")]
+        new_cursor = max(aTsPool) if aTsPool else ""
+    else:
+        new_cursor = max(m.get("ts", "") for m in window if m.get("ts"))
     if new_cursor and (not last_seen or new_cursor > last_seen):
         save_cursor(persona, new_cursor)
-        print(f"✓ cursor 推進到 {new_cursor}")
+        print(f"✓ cursor 推進到 {new_cursor}"
+              + (f"（只到已顯示的最新一筆 —— 尚有 {aSkipped} 筆未讀留著）" if aSkipped > 0 else ""))
     return 0
 
 
