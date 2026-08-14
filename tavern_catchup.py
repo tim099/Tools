@@ -401,7 +401,8 @@ def compact_body(body: str, max_chars: int = 240) -> str:
     return s
 
 # 區塊職責：印單筆訊息
-def print_msg(msg: dict):
+def print_msg(msg: dict, full: bool = False):
+    """印一筆訊息。full=True 不截斷內文（--full）。"""
     ts = msg.get("ts", "")
     # 取 HH:MM:SS（UTC→台北只需 +8）
     try:
@@ -419,7 +420,8 @@ def print_msg(msg: dict):
     if tag:
         head += f"  «{tag}»"
     print(head)
-    print(f"   {compact_body(msg.get('body', ''))}")
+    aBody = msg.get("body", "")
+    print(f"   {aBody if full else compact_body(aBody)}")
 
 
 # ===========================================================
@@ -579,6 +581,18 @@ def main():
     ap.add_argument("--context", type=int, default=None,
                     help="未看訊息少於 N 筆時，補印已看過的最近訊息湊到 N 筆掌握近況"
                          "（預設讀 ding_context_count，內建 5 = ucl-ding 的「至少讀最近 5 條」；0 = 不補）。")
+    # 區塊職責：自帶輸出上限與詳略切換 —— **把「需要 | head」這個理由移走**
+    # 物理意義：🩸 血證：Windows 上 `catchup | head` 會讓 head 提早關管線 → print 拋
+    #          BrokenPipeError → main 死在中途 → **cursor 永遠不推進**，而 pipeline 的退出碼
+    #          是 head 的 0。我當時看到「cursor 卡住」的第一個念頭是「工具有問題」，
+    #          而工具是無辜的。真正該修的不是那條管線，是**讓人不必接那條管線**。
+    # 數值影響：--limit 只影響「未看訊息」的印出筆數（不影響 window 掃描與 cursor 語意）；
+    #          --full 關掉單筆截斷。兩者都純顯示層。
+    ap.add_argument("--limit", type=int, default=None,
+                    help="最多印幾筆未看訊息（其餘只報數量）。想少讀用這個，"
+                         "**不要用 | head** —— 那會讓 cursor 靜默不推進。")
+    ap.add_argument("--full", action="store_true",
+                    help="不截斷單筆內文（預設截斷）。")
     ap.add_argument("--reset", action="store_true",
                     help="重置 cursor（刪除 cursor 檔，下次叮會看到全部 window）。")
     args = ap.parse_args()
@@ -682,8 +696,12 @@ def _run(args, persona: str) -> int:
         print(f"✓ 沒有未看過的新訊息。")
     else:
         print(f"== {len(unseen)} 筆未看訊息 ==")
-        for m in unseen:
-            print_msg(m)
+        aShown = unseen if not args.limit or args.limit <= 0 else unseen[-args.limit:]
+        if len(aShown) < len(unseen):
+            print(f"（--limit {args.limit}：只印最新 {len(aShown)} 筆，較舊的 {len(unseen) - len(aShown)} 筆略過"
+                  f" —— cursor 仍會推進到 window 末端，那幾筆不會再出現）")
+        for m in aShown:
+            print_msg(m, full=args.full)
             print()
 
     # 區塊：補 context（把 ucl-ding 的「至少讀最近 N 條掌握 context」收進工具）
@@ -716,5 +734,33 @@ def _run(args, persona: str) -> int:
     return 0
 
 
+# 區塊職責：EPIPE 兜底 —— 讓「輸出被下游截斷」變成看得見的失敗
+# 物理意義：下游（`| head`）提早關管線時 print 拋 BrokenPipeError，原本會讓 main 死在中途，
+#          於是**末端的 cursor 推進永遠不執行**，而 pipeline 的退出碼是 head 的 0 ——
+#          三件事疊起來就是「看起來成功、cursor 卻卡住」，而我當時的第一個念頭是「工具有問題」。
+# 數值影響：**刻意不在 EPIPE 時推進 cursor。** 輸出已被截斷，推進等於把沒顯示的訊息標成已讀 ——
+#          那是靜默丟內容，比重複顯示嚴重得多。
+#          ⚠ 我原本的備忘寫「cursor 推進搬到列印前」，那個處方是錯的：它正好造成上面那件事。
+#          改成「不推進 + 在 stderr 明說原因」——stderr 不會被 head 吃掉，所以人看得到。
+# 邊界：退出碼用 3（與正常 0 / 參數錯 2 區隔）；但注意接了管線之後 shell 只看得到 head 的碼，
+#      所以真正的訊號是 stderr 那行字，不是退出碼。
+def _main_guarded() -> int:
+    try:
+        return main()
+    except BrokenPipeError:
+        try:
+            for _line in (
+                "",
+                "⚠ 輸出被下游截斷（BrokenPipeError）—— **cursor 未推進**，這次讀到的不算已讀。",
+                "   原因：`| head` 之類的下游提早關掉管線。想少讀請用本工具自己的 `--limit N`，",
+                "   不要接 head —— 接了的話 pipeline 退出碼是 head 的 0，失敗會完全看不出來。",
+            ):
+                print(_line, file=sys.stderr)
+            sys.stderr.flush()
+        except Exception:
+            pass
+        return 3
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(_main_guarded())
