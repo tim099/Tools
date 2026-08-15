@@ -596,6 +596,24 @@ def main():
     ap.add_argument("--reset", action="store_true",
                     help="重置 cursor（刪除 cursor 檔，下次叮會看到全部 window）。")
     args = ap.parse_args()
+
+    # 區塊職責：**接了管線就在第一行講** —— 把警告從「失敗時」提前到「一開始」。
+    # 物理意義：既有的 EPIPE 兜底把警告印在 stderr，而典型呼叫是 `... 2>&1 | head -N`：
+    #          stderr 被併進管線後**一樣被 head 吃掉** ⇒ 那行警告從來沒被看見。
+    #          🩸 2026-08-15 實測：我一晚連打四次 `2>&1 | head`，四次 cursor 都沒推進，
+    #          而四次都以為自己讀完了（未看筆數 1→2→3 才發現）。
+    #          這是 2026-08-12 basecamp 同一隻的原樣復發 —— 而 `--limit` 早就做好了。
+    # ⇒ 教訓不是「紀律會失效」，是**提供替代 ≠ 關掉舊路**：舊路還在原地等人走上去。
+    #   工具關不掉那條路，但可以讓它**在被走上去的第一行就出聲**（head -N 一定看得到）。
+    # 邊界：只在 stdout 非 tty 時印；不擋執行（重導向到檔案是正當用法，那條路 cursor 會正常推進）。
+    try:
+        if not sys.stdout.isatty():
+            print("⚠ 偵測到輸出非終端機（被導向或接管線）。若是 `| head` / `| tail`："
+                  "**輸出會被截斷且 cursor 不會推進**（這次讀到的不算已讀）。"
+                  "想少讀請用本工具的 `--limit N`；想存檔請 `> file` 再讀那個檔。")
+    except Exception:
+        pass
+
     # None = 未顯式指定 → 落回管理頁設定（單一事實源）；顯式帶值一律優先
     if args.min_count is None:
         args.min_count = setting("ding_window_count")
