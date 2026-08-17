@@ -33,16 +33,12 @@ created_by: calli (claude-code), work session ws-20260516T082717Z-e8e0
 | 工具 | 一句話 | 對應 spec / skill |
 |---|---|---|
 | [balance_query.py](balance_query.py) | 查任一 actor / agent / persona Treasury 餘額 (ledger source-of-truth) | T41 ledger spec |
-| [migrate_voucher_v1_to_v2.py](migrate_voucher_v1_to_v2.py) | 酒館券資料格式 v1 → v2 遷移 | one-shot migration |
 
 ## 🎭 Persona / Affinity / Identity
 
 | 工具 | 一句話 | 對應 spec / skill |
 |---|---|---|
 | [affinity_update.py](affinity_update.py) | 更新 persona ↔ 對象 emotion_vector (8 軸) — **禁直編 relations.json** | ucl-affinity skill |
-| [persona_character_clone.py](persona_character_clone.py) | T03 — 從模板 clone RCG_CharacterData (ID / HP× / 自介) | Persona_Character_Workflow |
-| [persona_ding.py](persona_ding.py) | persona ↔ persona 自叮 (同 actor 內) | ucl-persona-ding skill |
-| [build_tavern_identities.py](build_tavern_identities.py) | 從 RCG_CharacterData 生成 tavern persona identity manifest | identity sync |
 
 ## 🍻 Tavern / Communication
 
@@ -55,15 +51,11 @@ created_by: calli (claude-code), work session ws-20260516T082717Z-e8e0
 
 | 工具 | 一句話 | 對應 spec / skill |
 |---|---|---|
-| [agent_task.py](agent_task.py) | T60 — Reverse task system: Agent → Tim 提案, Tim Y/N 接受 | agent-task skill |
 
 ## 🩺 QA / Balance / Debug
 
 | 工具 | 一句話 | 對應 spec / skill |
 |---|---|---|
-| [qa_balance_report.py](qa_balance_report.py) | T07 — QA Battle Balance Report Aggregator | Plan_QA_Battle_Balance_Workflow |
-| [qa_record_battle.py](qa_record_battle.py) | T03 — Battle Result Recorder | Plan_QA_Battle_Balance_Workflow |
-| [qa_score_card.py](qa_score_card.py) | T04 — Card Power Scorer | Plan_QA_Battle_Balance_Workflow |
 | [workflow_patch.py](workflow_patch.py) | Register workflow patch entry (≥3 patches → refactor 警示) | ucl-workflow-patch skill |
 | [debuglog_query.py](debuglog_query.py) | T03 — DebugLog 結構化查詢 (取代手動 grep multi-log) | DebugLog_Query_Workflow |
 
@@ -71,7 +63,6 @@ created_by: calli (claude-code), work session ws-20260516T082717Z-e8e0
 
 | 工具 | 一句話 | 對應 spec / skill |
 |---|---|---|
-| [morning_status.py](morning_status.py) | T59 — Tim 早晨 dashboard，彙整 token / Tavern 活動 / inbox | dashboard |
 
 ## 🔐 Secrets
 
