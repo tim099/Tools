@@ -47,7 +47,11 @@ _HERE = Path(__file__).resolve().parent
 _REPO_ROOT = _HERE.parent.parent
 
 _QUOTA_PATH = _REPO_ROOT / "AgentCommands" / "ChatTavern" / "agent_bonus_quota.json"
-_PERSONAS_DIR = _REPO_ROOT / "AgentCommands" / "AwakenInit" / "personas"
+import sys as _sys
+if str(_REPO_ROOT) not in _sys.path:
+    _sys.path.insert(0, str(_REPO_ROOT))
+from AgentCommands._lib import tavern_paths as _tp   # noqa: E402
+_PERSONAS_DIR = _tp.PERSONAS_DIR   # 委派：唯一解析點在 tavern_paths → ucl_paths
 
 # ⚠️ DEAD 一次性遷移殘留 (2026-05-13)，非 live SOT、已 stale (缺 gemini/Luna)。
 # agent→bank 真相見 _lib/bank_resolver.py + _registry_meta.json。勿新增/信任本表。

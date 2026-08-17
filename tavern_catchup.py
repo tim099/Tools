@@ -67,11 +67,13 @@ CURSOR_DIR = os.path.join(REPO_ROOT, "AgentCommands", "ChatTavern", "_inbox_curs
 SESSION_DIR = os.path.join(REPO_ROOT, "AgentCommands", "_session")
 # R2 讀取端收斂 (2026-07-24)：durable inbox 目錄 + persona pool（persona→agent 反查用）
 INBOX_DIR = os.path.join(REPO_ROOT, "AgentCommands", "ChatTavern", "rooms", "tavern", "inbox")
-PERSONAS_DIR = os.path.join(REPO_ROOT, "AgentCommands", "AwakenInit", "personas")
 # T-PATH-02: UCL_Core Tools~/AgentCommands 走 layout-agnostic resolver, 不再寫死 CardGame/...
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 from AgentCommands._lib import tavern_paths as _tp  # noqa: E402
+# 委派：persona 目錄的唯一解析點在 tavern_paths → ucl_paths（原本自己拼字串，
+#       資料根被 override 時會安靜讀錯目錄且不報錯）。
+PERSONAS_DIR = str(_tp.PERSONAS_DIR)
 AWAKENING_DIR = str(_tp.UCL_AGENTCMD_DIR)
 
 
