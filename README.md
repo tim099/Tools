@@ -1,14 +1,20 @@
 ---
 title: AgentCommands/Tools — Python CLI 工具索引
-description: 22 個 Python CLI 工具 + 一個 crypto helper module 的 one-liner 索引, 跨 agent 找工具不用 grep
-last_updated: 2026-05-16
+description: 本 repo project-specific Python CLI 工具的 one-liner 索引（現存 6 支）, 跨 agent 找工具不用 grep
+last_updated: 2026-08-17
 target_audience: [AI_Agent (Claude / Antigravity / Gemini / Zeta), Tim]
 created_by: calli (claude-code), work session ws-20260516T082717Z-e8e0
 ---
 
 # AgentCommands/Tools — Python CLI 工具索引
 
-> 22 個 Python CLI 工具 + 1 crypto helper module。每條走 `python AgentCommands/Tools/<name>.py <args>` 呼叫；多半 standalone 不靠 Unity Editor。
+> **現存 6 支**（2026-08-17 對著磁碟點過：`affinity_update` / `debuglog_query` / `screenshot` /
+> `tavern_catchup` / `tavern_query` / `workflow_patch`）。每條走
+> `python AgentCommands/Tools/<name>.py <args>` 呼叫；多半 standalone 不靠 Unity Editor。
+>
+> ⚠ 本檔原本寫「22 個工具」並替 6 支**已刪除**的工具留著 markdown 連結（點下去是 404，
+> 而讀的人會以為是自己路徑打錯）。退役的一律留一行指向現在的入口，不要只把行刪掉 ——
+> 舊文件與舊記憶還會把人帶回這裡。
 >
 > 工具動工原則：能用工具的場景**禁直編** JSON (relations / treasury / tavern messages) — 直接 IO 違反 schema, 走工具 wrap 才能保 audit trail。
 >
@@ -30,9 +36,17 @@ created_by: calli (claude-code), work session ws-20260516T082717Z-e8e0
 > 或 `UCL_BankAdminPage`。理由：直寫會繞過冪等判重、`sig_*` 簽章、
 > 以及**餘額快取的增量維護** —— 後者會讓 Editor 看到的餘額與磁碟不一致且無錯誤訊息。
 
-| 工具 | 一句話 | 對應 spec / skill |
-|---|---|---|
-| [balance_query.py](balance_query.py) | 查任一 actor / agent / persona Treasury 餘額 (ledger source-of-truth) | T41 ledger spec |
+**本節現在一支工具都不剩** —— `balance_query.py` 已於 2026-08-17 移除，**餘額查詢統一走 CMD**：
+
+```bash
+python <UCL_Core>/Tools~/AgentCommands/run_cmd.py --persona <me> run Bartender \
+    --arg op=balance --arg account=<id> --arg limit=10
+```
+
+> 🩸 刪它不是為了少一支工具：它用 `dataPath/../..` 推 repo root，扁平佈局下算到 repo 的**上一層**，
+> 那裡剛好有一整棵舊 AgentCommands ⇒ **它沒報錯，還回了一個看起來正常的數字**（實測差 876 token，
+> 而酒館裡每個人查到的都是那個錯的）。現在唯一擁有餘額的是 C# `UCL_TreasuryLedger`
+> （增量快取 + snapshot），inline `[查詢餘額]` 與 `op=balance` 共用同一條算法。
 
 ## 🎭 Persona / Affinity / Identity
 
@@ -45,12 +59,15 @@ created_by: calli (claude-code), work session ws-20260516T082717Z-e8e0
 | 工具 | 一句話 | 對應 spec / skill |
 |---|---|---|
 | [tavern_query.py](tavern_query.py) | T56 — Read-only 酒館訊息查詢 (不走 Cmd_Tavern) | T56 spec |
-| [discord_inbound_bot.py](discord_inbound_bot.py) | Discord channel → Tavern 中繼 daemon (gateway listener) | Discord_Inbound_Workflow |
+| [tavern_catchup.py](tavern_catchup.py) | 叮 / 早安的酒館 catch-up：在線一覽＋未讀＋persona inbox，跑完推已讀游標 | ucl-ding / ucl-chat-tavern skill |
+
+`discord_inbound_bot.py` 已移除 —— Discord → Tavern 中繼整條搬 C#
+（`UCL_DiscordInboundDaemon` / `UCL_DiscordMirrorDaemon`），python 端不再有 gateway listener。
 
 ## 📋 Task / Work Session
 
-| 工具 | 一句話 | 對應 spec / skill |
-|---|---|---|
+**空了** —— `agent_task.py` / `workflow_notes.py` / `plan_index.py` 皆已移除，任務走
+`Cmd_Tavern` 的 `task_*` op 系列（`task_create` / `task_claim` / `task_progress` / `task_done` …）。
 
 ## 🩺 QA / Balance / Debug
 
@@ -61,15 +78,13 @@ created_by: calli (claude-code), work session ws-20260516T082717Z-e8e0
 
 ## ☀️ Morning / Status
 
-| 工具 | 一句話 | 對應 spec / skill |
-|---|---|---|
+**空了** —— `morning_status.py` 已移除，早安一律走 `Cmd_GoodMorning`（skill `ucl-morning`）。
 
 ## 🔐 Secrets
 
-| 工具 | 一句話 | 對應 spec / skill |
-|---|---|---|
-| [secret_install.py](secret_install.py) | Secret encrypt / decrypt / status CLI (passphrase-based, Fernet) | _secrets/ workflow |
-| [secrets_crypto.py](secrets_crypto.py) | `import` helper module (KDF 200k iter, AES-128-CBC + HMAC-SHA256) — non-CLI | (used by secret_install) |
+**已搬 UCL_Core**（本 repo 不再留副本）：CLI 走 `<UCL_Core>/Tools~/AgentCommands/ucl_secret.py`，
+crypto helper 是 `<UCL_Core>/Tools~/AgentCommands/_lib/ucl_secrets_crypto.py`（非 CLI）。
+原 `secret_install.py` / `secrets_crypto.py` 已刪除。
 
 ## 📸 Misc
 
