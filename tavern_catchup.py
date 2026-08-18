@@ -220,7 +220,7 @@ def cursor_path(persona: str) -> str:
 # ===========================================================
 # Ding brief — 每次叮留下「這次到底讀到了什麼」的可稽核副本
 # ===========================================================
-# 區塊職責：把本次 catchup 的**實際輸出**落檔成 letters/<persona>/_ding_brief.md（每次覆蓋）。
+# 區塊職責：把本次 catchup 的**實際輸出**落檔成 letters/<persona>/cmd/ding_brief.md（每次覆蓋）。
 # 物理意義：叮的輸出原本只存在於 stdout —— 一旦 agent 沒跑工具而自己手撈訊息，
 #          外人看不出差別（Tim 2026-08-04 抓包：summit 手寫 python 讀訊息，
 #          於是完全繞過 format_online_line，@ 了一個其實不在線的 gura）。
@@ -228,9 +228,14 @@ def cursor_path(persona: str) -> str:
 # 數值影響：唯一新增寫檔；純附加產物，不影響 cursor / token / 任何既有狀態。
 #          內容是 stdout 的 tee —— **不重建、不改寫**，所以檔案跟 agent 讀到的東西
 #          不可能漂移（重建一份「應該一樣」的副本才會漂）。
+# 落點走 ucl_paths 的版面解析（Plan_Letters_Dir_Layout §8.2 批次②）——
+# 原本在這裡自己 join 五段路徑：那是第 N 種算法，而路徑重造的失敗是靜默的
+# （寫進另一個宇宙的檔，回一個看起來正常的路徑）。
+# ⚠ 對側契約：C# 端等價入口 = UCL_LettersPath.CmdPayload / EnsureCmdDir。
 def ding_brief_path(persona: str) -> str:
-    return os.path.join(REPO_ROOT, "AgentCommands", "ChatTavern", "baton",
-                        "letters", persona, "_ding_brief.md")
+    from AgentCommands._lib.ucl_paths import ensure_letters_cmd_dir, letters_cmd_payload
+    ensure_letters_cmd_dir(persona)          # 建目錄＋補 cmd/.gitignore（回傳檔不入版控）
+    return str(letters_cmd_payload(persona, "ding", "brief"))
 
 
 class _Tee:
@@ -656,7 +661,7 @@ def main():
         return 2
 
     # 區塊：ding brief tee（persona 已定案之後才裝 —— 之前的錯誤沒有歸屬對象可落檔）
-    # 物理意義：把 _run 的 stdout 逐字複製一份到 letters/<persona>/_ding_brief.md。
+    # 物理意義：把 _run 的 stdout 逐字複製一份到 letters/<persona>/cmd/ding_brief.md。
     #          裝在這裡而不是每個 print 各自寫，是因為 print 散在 print_msg / surface_inbox 裡，
     #          逐點改一定漏（而漏掉的那幾行沒有任何檢查會發現）。
     real = sys.stdout
