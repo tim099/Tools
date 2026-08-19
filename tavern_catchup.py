@@ -83,8 +83,7 @@ AWAKENING_DIR = str(_tp.UCL_AGENTCMD_DIR)
 # 區塊職責：目前有 live lock 的 persona 一覽（給叮 / catchup 的表頭用）。
 # 物理意義：被叮的人第一件事是「進 context」，而「現在誰在線」是 context 的一部分 ——
 #          之前要另外跑一支指令才看得到，於是實務上沒人看。整合進既有輸出＝不增加步驟。
-# 數值影響：過期判定沿用 awakening.is_lock_expired（同一套規則，不另立標準）；
-#          讀不到一律回空 list —— **空不代表沒人在線，只代表查不到**，所以顯示時要講清楚。
+# 數值影響：讀不到一律回空 list —— **空不代表沒人在線，只代表查不到**，所以顯示時要講清楚。
 def list_online_personas():
     try:
         if AWAKENING_DIR not in sys.path:
@@ -110,15 +109,13 @@ def format_online_line(me: str = "") -> str:
 # 區塊職責：在線明細（給 ding brief 用；比一行版多出「憑什麼說他在線」）。
 # 物理意義：一行版只給名字，無法回答「這個名字是新鮮的還是過期 lock」——
 #          而 @ 一個其實不在線的人是靜默失敗：訊息發出去、沒人回，看起來像對方不理你。
-# 數值影響：純讀 _session/_persona_*.json；過期判定沿用 awakening.is_lock_expired（不另立標準）。
-#          **列出全部 lock 檔（含過期），過期的標明** —— 只列 live 的會讓「有 lock 但過期」
-#          跟「從來沒登入過」長得一模一樣，而這兩者要採取的行動不同。
+# 數值影響：純讀 _session/_persona_*.json（走 awakening.list_locks 唯一掃描實作）。
+#          （過期機制已於 2026-08-19 移除：有 lock ＝ 在線，直到 goodnight/logout 刪檔。）
 def online_detail_rows() -> list:
     """回 [(persona, live?, bank)]，依 persona 排序。
 
     只給三欄 —— persona / 是否在線 / 該 persona 的 **bank 帳戶**。
-    locked_at 與 session_key 刻意不列（Tim 2026-08-04）：叮要的是「誰在、歸誰的帳」，
-    而「這筆 lock 新不新鮮」的結論已經由 🟢/⚪ 表達 —— 把證據攤出來只是讓人再判一次。
+    locked_at 與 session_key 刻意不列（Tim 2026-08-04）：叮要的是「誰在、歸誰的帳」。
     第三欄取 lock 的 `bank_account`（Tim 2026-08-04 拍板 A 案），理由是 registry 的
     `agent` 欄跨 persona 裝著兩種東西 —— summit/ame 存身分名 `Zeta`、basecamp 存工具名
     `claude-code` —— 欄名叫 agent 而內容是混的，拿它當「帳戶」顯示會印出錯類別的值。
@@ -132,11 +129,11 @@ def online_detail_rows() -> list:
         awk = importlib.import_module("awakening")
     except Exception:
         return rows
-    # 走 awakening.list_locks() 唯一掃描實作（含過期，`_expired` 已算好）。
-    # 壞掉的 lock 檔由中央實作印 stderr 警告後略過 —— 本函式不再替它們造 (basename, None) 列。
+    # 走 awakening.list_locks() 唯一掃描實作。壞掉的 lock 檔由中央實作印 stderr 警告後略過。
+    # 過期機制已移除 ⇒ 有 lock 即在線，live 欄恆 True（保留欄位形狀，消費端不必跟著改）。
     for lock in awk.list_locks():
         name = (lock.get("persona") or "").strip()
-        rows.append((name, not lock.get("_expired"),
+        rows.append((name, True,
                      lock.get("bank_account") or resolve_owning_agent(name)
                      or lock.get("agent") or ""))
     return rows
@@ -254,7 +251,7 @@ def write_ding_brief(persona: str, captured: str, argv_note: str) -> str:
         L.append("| (無 lock 檔) | — | — |")
     else:
         for name, live, agent in rows:
-            mark = "🟢 在線" if live else ("⚪ lock 已過期" if live is False else "❔ 判不出")
+            mark = "🟢 在線" if live else "❔ 判不出"
             me = "　**← 你**" if name == persona else ""
             L.append(f"| `{name}`{me} | {mark} | {agent} |")
     L += [
