@@ -135,8 +135,28 @@ def online_detail_rows() -> list:
         name = (lock.get("persona") or "").strip()
         rows.append((name, True,
                      lock.get("bank_account") or resolve_owning_agent(name)
-                     or lock.get("agent") or ""))
+                     or lock.get("agent") or "",
+                     _fmt_now_status(lock)))
     return rows
+
+
+def _fmt_now_status(lock: dict) -> str:
+    """now_status（§8.5）＋「多久前」。staleness 必顯示 —— 過舊的狀態比沒有狀態更誤導。"""
+    st = (lock.get("now_status") or "").strip()
+    if not st:
+        return ""
+    ts = (lock.get("status_updated_at") or "").strip()
+    age = ""
+    try:
+        dt = datetime.strptime(ts[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
+        sec = (datetime.now(timezone.utc) - dt).total_seconds()
+        if sec < 60: age = "剛剛"
+        elif sec < 3600: age = f"{int(sec // 60)} 分鐘前"
+        elif sec < 86400: age = f"{int(sec // 3600)} 小時前"
+        else: age = f"{int(sec // 86400)} 天前"
+    except Exception:
+        age = ""
+    return f"{st}（{age}）" if age else st
 
 
 # 區塊職責：自動推斷當前 caller 對應的 persona
@@ -244,16 +264,16 @@ def write_ding_brief(persona: str, captured: str, argv_note: str) -> str:
         "",
         "## 🟢 在線明細（憑 `_session/_persona_*.json` 的 lock）",
         "",
-        "| persona | 狀態 | Bank（帳戶） |",
-        "|---|---|---|",
+        "| persona | 狀態 | Bank（帳戶） | 目前在做什麼 |",
+        "|---|---|---|---|",
     ]
     if not rows:
-        L.append("| (無 lock 檔) | — | — |")
+        L.append("| (無 lock 檔) | — | — | — |")
     else:
-        for name, live, agent in rows:
+        for name, live, agent, now_status in rows:
             mark = "🟢 在線" if live else "❔ 判不出"
             me = "　**← 你**" if name == persona else ""
-            L.append(f"| `{name}`{me} | {mark} | {agent} |")
+            L.append(f"| `{name}`{me} | {mark} | {agent} | {now_status or '—'} |")
     L += [
         "",
         "> ⚠ **空或查不到 ≠ 沒人在線**，只代表查不到 lock。",
@@ -685,10 +705,11 @@ def _run(args, persona: str) -> int:
     print(format_online_line(persona))
     # 在線明細也印進 stdout（不只落 brief）—— 一行版只給名字，答不了「這名字新鮮嗎」，
     # 而 @ 一個不在線的人是靜默失敗。印在這裡＝agent 不必多跑一步就看得到。
-    for name, live, agent in online_detail_rows():
-        mark = "🟢" if live else ("⚪ lock 過期" if live is False else "❔")
+    for name, live, agent, now_status in online_detail_rows():
+        mark = "🟢" if live else "❔"
         me = " ← 你" if name == persona else ""
-        print(f"   {mark} {name}{me}" + (f"　（{agent}）" if agent else ""))
+        print(f"   {mark} {name}{me}" + (f"　（{agent}）" if agent else "")
+              + (f"　💬 {now_status}" if now_status else ""))
     print("   ⚠ 沒列在上面的人不要當成在線來 @（空 ≠ 沒人，只是查不到 lock）")
     print()
     if hidden_system:
