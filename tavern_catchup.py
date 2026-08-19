@@ -22,7 +22,6 @@ import argparse
 import json
 import os
 import sys
-import glob
 from datetime import datetime, timezone
 
 # 區塊職責：Windows 端編碼安全保護
@@ -92,19 +91,9 @@ def list_online_personas():
             sys.path.insert(0, AWAKENING_DIR)
         import importlib
         awk = importlib.import_module("awakening")
-        out = []
-        for lp in glob.glob(os.path.join(SESSION_DIR, "_persona_*.json")):
-            try:
-                with open(lp, "r", encoding="utf-8") as f:
-                    lock = json.load(f)
-                if awk.is_lock_expired(lock):
-                    continue
-                name = (lock.get("persona") or "").strip()
-                if name:
-                    out.append(name)
-            except Exception:
-                continue
-        return sorted(out)
+        # 走 awakening.list_online() 唯一掃描實作（對側 = C# UCL_ActivePersonaLocks），不自己 glob
+        return sorted((d.get("persona") or "").strip() for d in awk.list_online()
+                      if (d.get("persona") or "").strip())
     except Exception:
         return []
 
@@ -141,19 +130,13 @@ def online_detail_rows() -> list:
             sys.path.insert(0, AWAKENING_DIR)
         import importlib
         awk = importlib.import_module("awakening")
-        expired_of = awk.is_lock_expired
     except Exception:
-        expired_of = None
-    for lp in sorted(glob.glob(os.path.join(SESSION_DIR, "_persona_*.json"))):
-        try:
-            with open(lp, "r", encoding="utf-8") as f:
-                lock = json.load(f)
-        except Exception:
-            rows.append((os.path.basename(lp), None, ""))
-            continue
-        name = (lock.get("persona") or os.path.basename(lp)).strip()
-        live = None if expired_of is None else (not expired_of(lock))
-        rows.append((name, live,
+        return rows
+    # 走 awakening.list_locks() 唯一掃描實作（含過期，`_expired` 已算好）。
+    # 壞掉的 lock 檔由中央實作印 stderr 警告後略過 —— 本函式不再替它們造 (basename, None) 列。
+    for lock in awk.list_locks():
+        name = (lock.get("persona") or "").strip()
+        rows.append((name, not lock.get("_expired"),
                      lock.get("bank_account") or resolve_owning_agent(name)
                      or lock.get("agent") or ""))
     return rows
@@ -179,21 +162,8 @@ def resolve_persona_auto(strict: bool = True):
         awk = importlib.import_module("awakening")
 
         my_origin = awk.compute_claim_origin()
-        live = []
-        for lp in glob.glob(os.path.join(SESSION_DIR, "_persona_*.json")):
-            try:
-                with open(lp, "r", encoding="utf-8") as f:
-                    lock = json.load(f)
-            except Exception:
-                continue
-            try:
-                if awk.is_lock_expired(lock):
-                    continue
-                if awk.lock_claim_origin(lock) != my_origin:
-                    continue
-                live.append(lock)
-            except Exception:
-                continue
+        # 走 awakening.find_locks_by_claim_origin() 唯一掃描實作，不自己 glob
+        live = awk.find_locks_by_claim_origin(my_origin)
         if not live:
             return (None, [])
         if len(live) > 1 and strict:
