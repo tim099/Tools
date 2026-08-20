@@ -48,7 +48,8 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
 
 # 路徑常數：相對 EOV repo root
 TAVERN_ROOT = "AgentCommands/ChatTavern/rooms"
-IDENTITIES_PATH = "AgentCommands/ChatTavern/identities.json"
+# identities.json 已廢棄（Tim 2026-08-20）—— 顯示名稱的真相源是一帳一檔的帳戶資料。
+ACCOUNTS_DIR = "AgentCommands/Treasury/accounts"
 
 
 def parse_since(s: str) -> datetime.timedelta:
@@ -124,14 +125,31 @@ def iter_room_messages(room: str, since: datetime.datetime = None) -> Iterator[d
 
 
 def load_identities() -> dict:
-    """區塊職責：載 identities.json 用作 sender_id → display_name 解析"""
+    """區塊職責：載 id → display_name 對照表。
+
+    物理意義：真相源是**帳戶資料**（`Treasury/accounts/<id>.json` 一帳一檔），
+    不是 `identities.json` —— 後者於 2026-08-20 拍板廢棄（Tim）。
+    🩸 為什麼換：合一遷移後 sender 變成新的 agent id，舊 roster 的鍵是遷移前的名字
+    ⇒ 大部分查不到、少數查到別人的（`cc` 那筆的 display_name 是 persona 名 `crest-001`）。
+    數值影響：純顯示；查不到就讓呼叫端 fallback 成 id。
+    """
+    out = {}
     try:
-        with open(IDENTITIES_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return {p["id"]: p.get("display_name", p["id"])
-                for p in data.get("identities", [])}
-    except (OSError, json.JSONDecodeError, KeyError):
+        for name in os.listdir(ACCOUNTS_DIR):
+            if not name.endswith(".json") or name.startswith("_"):
+                continue
+            try:
+                with open(os.path.join(ACCOUNTS_DIR, name), "r", encoding="utf-8-sig") as f:
+                    d = json.load(f)
+            except (OSError, json.JSONDecodeError):
+                continue
+            acc_id = d.get("id") or name[:-5]
+            dn = (d.get("display_name") or "").strip()
+            if acc_id and dn:
+                out[acc_id] = dn
+    except OSError:
         return {}
+    return out
 
 
 def resolve_sender_id(sid: str, identities: dict) -> str:
