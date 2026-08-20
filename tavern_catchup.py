@@ -18,8 +18,8 @@ MSG = """\
 ⛔ tavern_catchup.py 已退場（2026-08-20）—— 邏輯搬進 C#，游標從此只有一個寫入端。
 
 改跑：
-  python <UCL_Core>/Tools~/AgentCommands/run_cmd.py --persona <me> run Tavern \
-      --arg op=catchup --arg persona=<me>
+  python <UCL_Core>/Tools~/AgentCommands/run_cmd.py --persona <me> run Tavern --arg op=catchup
+  （`--persona` 同時決定 queue 路由並戳進 args，不必再寫 --arg persona=）
 
   可選：--arg min=10（至少讀幾筆）／--arg quiet_system=0（含酒保廣播）
         --arg include_self=1（含自己）／--arg advance=0（**不推游標**，只看）

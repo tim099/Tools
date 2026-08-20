@@ -13,8 +13,8 @@ MSG = """\
 ⛔ tavern_query.py 已退場（2026-08-20）—— 邏輯搬進 C#。
 
 改跑：
-  python <UCL_Core>/Tools~/AgentCommands/run_cmd.py --persona <me> run Tavern \
-      --arg op=query --arg persona=<me> --arg kind=<kind> [...]
+  python <UCL_Core>/Tools~/AgentCommands/run_cmd.py --persona <me> run Tavern --arg op=query --arg kind=<kind> [...]
+  （`--persona` 同時決定 queue 路由並戳進 args，不必再寫 --arg persona=）
 
   kind=rooms      [--arg since=24h]
   kind=tail       --arg room=tavern --arg limit=20
