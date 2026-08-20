@@ -436,20 +436,23 @@ def _persona_profile():
     """persona 欄位讀取接縫（`_lib/persona_profile.py`），**整個 process 只載一份**。
 
     # 區塊職責：把接縫模組的載入收在一處，並快取。
-    # 物理意義：接縫的三段 fallback 有 module 級快取（每 process 只發一次 Cmd）——
-    #          而那個快取住在模組實例上 ⇒ 每次呼叫都 `exec_module` 一份新的，等於快取不存在。
-    #          🩸 `agent_email._persona_profile()` 正是那樣寫的（BUG-17）：不帶 UCL_PP_SKIP_CMD 時
-    #          變成「每次 load_persona 一趟 Cmd」，而症狀只是慢，沒有任何一行會紅。
-    # 數值影響：載入失敗回 None，由呼叫端 fail-soft 並印警告（不靜默當成「這個人沒有 agent」）。
+    # 物理意義：載入走 UCL_Core 的 `_lib/seam` 共用 loader —— **實例唯一性由它保證**
+    #          （以解析後的絕對路徑當 sys.modules 的 key）。本檔的 `_PERSONA_PROFILE_MOD`
+    #          只是省一次 seam 載入。
+    #          🩸 為什麼不自己 `spec_from_file_location` 接縫：那個 API 每次呼叫都造一份新模組，
+    #          而接縫的 per-process 快取（＝「這個行程發過幾次 Cmd」）住在模組實例上
+    #          ⇒ 每多一份就多一趟 Cmd 往返（BUG-17，agent_email 舊版是每次呼叫一份）。
+    # 數值影響：載入失敗讓例外往上拋，由呼叫端 fail-soft 並印警告
+    #          （不靜默當成「這個人沒有 agent」——「問不到」與「沒有」不得同形）。
     """
     global _PERSONA_PROFILE_MOD
     if _PERSONA_PROFILE_MOD is None:
         import importlib.util as _ilu
-        _p = os.path.join(AWAKENING_DIR, "_lib", "persona_profile.py")
-        _spec = _ilu.spec_from_file_location("_ucl_persona_profile_tavern_catchup", _p)
-        _m = _ilu.module_from_spec(_spec)
-        _spec.loader.exec_module(_m)
-        _PERSONA_PROFILE_MOD = _m
+        _p = os.path.join(AWAKENING_DIR, "_lib", "seam.py")
+        _spec = _ilu.spec_from_file_location("_ucl_seam_loader_tavern_catchup", _p)
+        _seam = _ilu.module_from_spec(_spec)
+        _spec.loader.exec_module(_seam)
+        _PERSONA_PROFILE_MOD = _seam.persona_profile()
     return _PERSONA_PROFILE_MOD
 
 
