@@ -72,7 +72,9 @@ if REPO_ROOT not in sys.path:
 from AgentCommands._lib import tavern_paths as _tp  # noqa: E402
 # 委派：persona 目錄的唯一解析點在 tavern_paths → ucl_paths（原本自己拼字串，
 #       資料根被 override 時會安靜讀錯目錄且不報錯）。
-PERSONAS_DIR = str(_tp.PERSONAS_DIR)
+# ⛔ `PERSONAS_DIR` 已移除（2026-08-20，Plan_Persona_Registry_Retirement §4.1）：
+#    唯一消費端 resolve_owning_agent 改走接縫之後它就沒有呼叫端了，而留一支「直接指到
+#    legacy persona 檔」的路徑組裝 = 邀請下一個人再走直讀那條路（同 agent_email.persona_path()）。
 AWAKENING_DIR = str(_tp.UCL_AGENTCMD_DIR)
 
 
@@ -427,13 +429,49 @@ def print_msg(msg: dict, full: bool = False):
 #          catchup 讀「自己 persona.md ＋ 所屬 agent.md」兩層（basecamp 2026-07-24 拍磚：agent 是共用信箱層）。
 # 收斂原則（不造第三追蹤器）：inbox 已讀狀態 = 檔內有無內容（inbox_ack.py archive 後清空）；
 #          本段純唯讀 surface，不推進任何 cursor、不動 inbox — 清除仍歸 inbox_ack.py（單一 mutator）。
+_PERSONA_PROFILE_MOD = None
+
+
+def _persona_profile():
+    """persona 欄位讀取接縫（`_lib/persona_profile.py`），**整個 process 只載一份**。
+
+    # 區塊職責：把接縫模組的載入收在一處，並快取。
+    # 物理意義：接縫的三段 fallback 有 module 級快取（每 process 只發一次 Cmd）——
+    #          而那個快取住在模組實例上 ⇒ 每次呼叫都 `exec_module` 一份新的，等於快取不存在。
+    #          🩸 `agent_email._persona_profile()` 正是那樣寫的（BUG-17）：不帶 UCL_PP_SKIP_CMD 時
+    #          變成「每次 load_persona 一趟 Cmd」，而症狀只是慢，沒有任何一行會紅。
+    # 數值影響：載入失敗回 None，由呼叫端 fail-soft 並印警告（不靜默當成「這個人沒有 agent」）。
+    """
+    global _PERSONA_PROFILE_MOD
+    if _PERSONA_PROFILE_MOD is None:
+        import importlib.util as _ilu
+        _p = os.path.join(AWAKENING_DIR, "_lib", "persona_profile.py")
+        _spec = _ilu.spec_from_file_location("_ucl_persona_profile_tavern_catchup", _p)
+        _m = _ilu.module_from_spec(_spec)
+        _spec.loader.exec_module(_m)
+        _PERSONA_PROFILE_MOD = _m
+    return _PERSONA_PROFILE_MOD
+
+
+# 區塊職責：persona → 所屬 agent（在線清單那一欄的 fallback 之一）。
+# 物理意義：persona 欄位的唯一讀取入口是接縫（Plan_Persona_Registry_Retirement §8.7 A+B）。
+#          直讀 `AwakenInit/personas/*.json` ＝ 第二個解析器；Phase 1 之後 identity 已搬進
+#          `letters/<p>/profile/`，直讀拿到的是**遷移那一刻的凍結值**。
+#          `agent` 是 routing 欄、依 §8.3 留在專案層，所以直讀今天答案還對 ——
+#          但入口不統一的代價是「下一個人不知道該問誰」，而那筆帳會在欄位搬家時一次付清。
+# 數值影響：兩種呼叫時機都驗過安全（2026-08-20）——
+#          ① CLI 直跑 ⇒ 接縫走 Cmd 拿現場值；
+#          ② 被 wake_brief 載進 Cmd 內部 ⇒ 父行程已設 `UCL_PP_SKIP_CMD=1`
+#             （`UCL_AwakeningService`）⇒ 接縫改讀快照，**不會在 Cmd 裡面再排一個 Cmd**。
 def resolve_owning_agent(persona: str) -> str:
-    """讀 AwakenInit/personas/<persona>.json 的 agent 欄；缺檔/失敗回空字串。"""
-    pf = os.path.join(PERSONAS_DIR, f"{persona}.json")
+    """persona 的 agent 歸屬；問不到回空字串（呼叫端是 or 鏈中段，空字串即讓它繼續往下退）。"""
     try:
-        with open(pf, "r", encoding="utf-8") as f:
-            return (json.load(f).get("agent") or "").strip()
-    except Exception:
+        mod = _persona_profile()
+        return (mod.get_field(persona, "agent") or "").strip()
+    except Exception as e:
+        # fail-soft 要出聲：靜默回空字串會讓「問不到」跟「這個人沒有 agent」同形。
+        print(f"⚠ [tavern_catchup] persona '{persona}' 的 agent 讀取失敗（接縫）：{e}",
+              file=sys.stderr)
         return ""
 
 
