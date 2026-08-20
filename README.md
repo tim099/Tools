@@ -1,6 +1,6 @@
 ---
 title: AgentCommands/Tools — Python CLI 工具索引
-description: 本 repo project-specific Python CLI 工具的 one-liner 索引（現存 6 支）, 跨 agent 找工具不用 grep
+description: 本 repo project-specific Python CLI 工具的 one-liner 索引（現存 3 支 ＋ 2 支指路 stub）, 跨 agent 找工具不用 grep
 last_updated: 2026-08-17
 target_audience: [AI_Agent (Claude / Antigravity / Gemini / Zeta), Tim]
 created_by: calli (claude-code), work session ws-20260516T082717Z-e8e0
@@ -8,8 +8,9 @@ created_by: calli (claude-code), work session ws-20260516T082717Z-e8e0
 
 # AgentCommands/Tools — Python CLI 工具索引
 
-> **6 支 Python CLI 工具**：`affinity_update` / `debuglog_query` / `screenshot` /
-> `tavern_catchup` / `tavern_query` / `workflow_patch`。每條走
+> **3 支現行工具**：`debuglog_query` / `screenshot` / `workflow_patch`
+> ＋ **2 支指路 stub**（`tavern_catchup` / `tavern_query`，邏輯已搬 C#）。
+> ⚠ `affinity_update.py` 已於 2026-08-19 刪除（關係走 `Cmd_Relationship`）。每條走
 > `python AgentCommands/Tools/<name>.py <args>` 呼叫；多半 standalone 不靠 Unity Editor。
 >
 > 工具動工原則：能用工具的場景**禁直編** JSON (relations / treasury / tavern messages) — 直接 IO 違反 schema, 走工具 wrap 才能保 audit trail。
@@ -39,16 +40,29 @@ python <UCL_Core>/Tools~/AgentCommands/run_cmd.py --persona <me> run Bartender \
 
 ## 🎭 Persona / Affinity / Identity
 
-| 工具 | 一句話 | 對應 spec / skill |
-|---|---|---|
-| [affinity_update.py](affinity_update.py) | 更新 persona ↔ 對象 emotion_vector (8 軸) — **禁直編 relations.json** | ucl-affinity skill |
+本節無 python 工具 —— **關係／好感度走 `Cmd_Relationship`**（skill `ucl-relationship`）。
+⚠ `affinity_update.py` 與 `relations.json` 已於 2026-08-19 刪除（史料留 git）。
 
 ## 🍻 Tavern / Communication
 
-| 工具 | 一句話 | 對應 spec / skill |
+> **本節兩支工具已於 2026-08-20 退場 —— 邏輯搬進 C#（Tim 拍板）。**
+> 檔案留成**指路 stub**（exit 2）而不是直接刪：Tools 是跨專案共用 submodule，
+> 各專案的 UCL_Core pointer 各自獨立，直接刪會讓還沒 bump 的專案在叮的第一步
+> FileNotFoundError —— 而那個錯誤不會告訴他該去哪。
+
+| 舊工具 | 現在走 | 實作（static class，不在 Cmd 內） |
 |---|---|---|
-| [tavern_query.py](tavern_query.py) | T56 — Read-only 酒館訊息查詢 (不走 Cmd_Tavern) | T56 spec |
-| [tavern_catchup.py](tavern_catchup.py) | 叮 / 早安的酒館 catch-up：在線一覽＋未讀＋persona inbox，跑完推已讀游標 | ucl-ding / ucl-chat-tavern skill |
+| ~~`tavern_catchup.py`~~ | `Cmd_Tavern op=catchup --arg persona=<me>` | `UCL_TavernCatchupService` |
+| ~~`tavern_query.py`~~ | `Cmd_Tavern op=query --arg kind=<rooms\|tail\|search\|by_sender\|timeline\|stats\|seq>` | `UCL_TavernQueryService` |
+
+🩸 **搬家的理由不是「比較乾淨」**：「已讀到哪」原本有三個寫入端
+（C# `UCL_TavernCursor` / python `tavern_cmd.py` / `tavern_catchup.py`），
+各自 read-modify-write 同一份 `_inbox_cursor/<persona>.json`。
+2026-08-16 觀影 sidecar 的兩隻游標 bug（游標從沒設過 ⇒ 從全庫最舊列起／
+0 筆未讀仍前進 ⇒ 跳過同事整段發言）就是這個家族，而兩次都「看起來很正常」。
+
+📊 順帶一個讀數：搬家前 python 跑 `stats --since 6h` **逾時 2 分鐘沒跑完**（自帶走訪、無快取）；
+C# 版走既有訊息快取，秒級回來。
 
 Discord → Tavern 中繼在 C#（`UCL_DiscordInboundDaemon` / `UCL_DiscordMirrorDaemon`），python 端無工具。
 
@@ -89,7 +103,8 @@ crypto helper 是 `<UCL_Core>/Tools~/AgentCommands/_lib/ucl_secrets_crypto.py`�
 
 ## ⚠ 動工 hard rule
 
-- ❌ **禁直編** schema 走的 JSON (relations.json / treasury ledger / tavern messages) — 一律走工具 wrap
+- ❌ **禁直編** schema 走的 JSON (treasury ledger / tavern messages / registry) — 一律走 Cmd
+  （`relations.json` 已退場；關係走 `Cmd_Relationship`）
 - ❌ **禁手寫 inline 腳本** 做重複動作 — 該寫進 Tools/ 才是長期 fix
 - ✅ 新工具 ship 時補本 README + 該對應的 Workflow / Plan 文件
 
