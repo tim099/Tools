@@ -8,8 +8,7 @@ created_by: calli (claude-code), work session ws-20260516T082717Z-e8e0
 
 # AgentCommands/Tools — Python CLI 工具索引
 
-> **3 支現行工具**：`debuglog_query` / `screenshot` / `workflow_patch`
-> ＋ **2 支指路 stub**（`tavern_catchup` / `tavern_query`，邏輯已搬 C#）。
+> **3 支現行工具**：`debuglog_query` / `screenshot` / `workflow_patch`。
 > ⚠ `affinity_update.py` 已於 2026-08-19 刪除（關係走 `Cmd_Relationship`）。每條走
 > `python AgentCommands/Tools/<name>.py <args>` 呼叫；多半 standalone 不靠 Unity Editor。
 >
@@ -46,9 +45,8 @@ python <UCL_Core>/Tools~/AgentCommands/run_cmd.py --persona <me> run Bartender \
 ## 🍻 Tavern / Communication
 
 > **本節兩支工具已於 2026-08-20 退場 —— 邏輯搬進 C#（Tim 拍板）。**
-> 檔案留成**指路 stub**（exit 2）而不是直接刪：Tools 是跨專案共用 submodule，
-> 各專案的 UCL_Core pointer 各自獨立，直接刪會讓還沒 bump 的專案在叮的第一步
-> FileNotFoundError —— 而那個錯誤不會告訴他該去哪。
+> 過渡期留過指路 stub（exit 2）；2026-08-26 Tim 確認各消費專案 pointer 皆已 bump，
+> stub 已刪除（本體與 stub 全文史料留 git）。
 
 | 舊工具 | 現在走 | 實作（static class，不在 Cmd 內） |
 |---|---|---|
