@@ -8,8 +8,8 @@ created_by: calli (claude-code), work session ws-20260516T082717Z-e8e0
 
 # AgentCommands/Tools — Python CLI 工具索引
 
-> **3 支現行工具**：`debuglog_query` / `screenshot` / `workflow_patch`。
-> ⚠ `affinity_update.py` 已於 2026-08-19 刪除（關係走 `Cmd_Relationship`）。每條走
+> **2 支現行工具**：`debuglog_query` / `screenshot`。
+> 每條走
 > `python AgentCommands/Tools/<name>.py <args>` 呼叫；多半 standalone 不靠 Unity Editor。
 >
 > 工具動工原則：能用工具的場景**禁直編** JSON (relations / treasury / tavern messages) — 直接 IO 違反 schema, 走工具 wrap 才能保 audit trail。
@@ -73,7 +73,6 @@ Discord → Tavern 中繼在 C#（`UCL_DiscordInboundDaemon` / `UCL_DiscordMirro
 
 | 工具 | 一句話 | 對應 spec / skill |
 |---|---|---|
-| [workflow_patch.py](workflow_patch.py) | Register workflow patch entry (≥3 patches → refactor 警示) | ucl-workflow-patch skill |
 | [debuglog_query.py](debuglog_query.py) | T03 — DebugLog 結構化查詢 (取代手動 grep multi-log) | DebugLog_Query_Workflow |
 
 ## ☀️ Morning / Status
