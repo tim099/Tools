@@ -39,7 +39,7 @@ python <UCL_Core>/Tools~/AgentCommands/run_cmd.py --persona <me> run Bartender \
 
 ## 🎭 Persona / Affinity / Identity
 
-本節無 python 工具 —— **關係／好感度走 `Cmd_Relationship`**（skill `ucl-relationship`）。
+本節無 python 工具 —— **關係／好感度走 `senate cmd relationship`**（skill `ucl-relationship`）。
 ⚠ `affinity_update.py` 與 `relations.json` 已於 2026-08-19 刪除（史料留 git）。
 
 ## 🍻 Tavern / Communication
@@ -101,7 +101,7 @@ crypto helper 是 `<UCL_Core>/Tools~/AgentCommands/_lib/ucl_secrets_crypto.py`�
 ## ⚠ 動工 hard rule
 
 - ❌ **禁直編** schema 走的 JSON (treasury ledger / tavern messages / registry) — 一律走 Cmd
-  （`relations.json` 已退場；關係走 `Cmd_Relationship`）
+  （`relations.json` 已退場；關係走 `senate cmd relationship`）
 - ❌ **禁手寫 inline 腳本** 做重複動作 — 該寫進 Tools/ 才是長期 fix
 - ✅ 新工具 ship 時補本 README + 該對應的 Workflow / Plan 文件
 
